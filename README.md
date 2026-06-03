@@ -42,7 +42,7 @@
 - **Curated categories** — Discover wallpapers organized by theme and style
 - **Collections & custom albums** — Save favorites and build personal collections
 - **Bilingual support** — Full Chinese / English interface
-- **Home-screen widget** — Set today's wallpaper directly from the widget
+- **Custom search** — Search with custom keywords and fetch wallpapers from the Pexels API
 
 ---
 
@@ -57,8 +57,6 @@
 | Networking | Retrofit 2 + OkHttp + Moshi |
 | Image loading | Coil |
 | Local storage | Room |
-| DI (manual) | ViewModel + Hilt-free |
-| Widget | Glance |
 | Build | Gradle Version Catalogs (libs.versions.toml) |
 
 ---
