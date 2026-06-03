@@ -33,8 +33,7 @@ app/build/
 debug.keystore
 # Environment variables / API keys
 .env
-# Keep .env.example (template without real values)
-!.env.example
+.env.example
 
 # ============================================================
 # WorkBuddy AI project context (local dev tool)

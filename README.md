@@ -71,20 +71,6 @@
 - JDK 11+
 - Android SDK 37
 
-### API Key
-
-This app uses the Gemini API for AI-powered features. You need to supply your own key.
-
-1. Get an API key from [Google AI Studio](https://aistudio.google.com/app/apikey).
-2. Copy `.env.example` to `.env` in the project root:
-   ```bash
-   cp .env.example .env
-   ```
-3. Replace the placeholder value in `.env`:
-   ```
-   GEMINI_API_KEY=YOUR_API_KEY_HERE
-   ```
-
 ### Build
 
 ```bash
@@ -121,7 +107,6 @@ TodayWallpaper/
 ├── gradle/
 │   └── libs.versions.toml                   # Version catalog
 ├── images/                                  # README assets
-├── .env.example                             # API key template
 ├── build.gradle.kts
 └── settings.gradle.kts
 ```
@@ -130,7 +115,7 @@ TodayWallpaper/
 
 ## Contributing
 
-Pull requests are welcome! For major changes, please open an issue first to discuss what you would like to change.
+Pull requests are welcome! Please read [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines on how to get started, submit a PR, or report an issue.
 
 ---
 

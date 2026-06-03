@@ -70,20 +70,6 @@
 - JDK 11+
 - Android SDK 37
 
-### 配置 API Key
-
-本应用使用 Gemini API 实现 AI 相关功能，需要自行提供密钥。
-
-1. 前往 [Google AI Studio](https://aistudio.google.com/app/apikey) 获取 API Key。
-2. 在项目根目录将 `.env.example` 复制为 `.env`：
-   ```bash
-   cp .env.example .env
-   ```
-3. 将 `.env` 中的占位值替换为你的真实密钥：
-   ```
-   GEMINI_API_KEY=YOUR_API_KEY_HERE
-   ```
-
 ### 构建
 
 ```bash
@@ -120,7 +106,6 @@ TodayWallpaper/
 ├── gradle/
 │   └── libs.versions.toml                   # 版本目录
 ├── images/                                  # README 图片资源
-├── .env.example                             # API Key 模板
 ├── build.gradle.kts
 └── settings.gradle.kts
 ```
@@ -129,7 +114,7 @@ TodayWallpaper/
 
 ## 贡献
 
-欢迎提交 Pull Request！若涉及较大改动，请先开 Issue 讨论。
+欢迎提交 Pull Request！请阅读 [CONTRIBUTING.md](CONTRIBUTING.md) 了解如何开始、提交 PR 或反馈问题。
 
 ---
 
