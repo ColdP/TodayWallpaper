@@ -1,0 +1,5 @@
+<resources>
+    <string name="app_name">Today Wallpaper</string>
+    <string name="widget_description">Display today\'s wallpaper with date overlay</string>
+    <string name="widget_label">Today Widget</string>
+</resources>

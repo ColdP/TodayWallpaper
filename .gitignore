@@ -1,0 +1,54 @@
+# ============================================================
+# Android / Gradle
+# ============================================================
+*.iml
+.gradle/
+.kotlin/
+/local.properties
+/build/
+app/build/
+**/build/
+/captures/
+.externalNativeBuild/
+.cxx/
+
+# ============================================================
+# IDE — Android Studio / IntelliJ IDEA
+# ============================================================
+/.idea/caches/
+/.idea/libraries/
+/.idea/modules.xml
+/.idea/workspace.xml
+/.idea/navEditor.xml
+/.idea/assetWizardSettings.xml
+.DS_Store
+
+# ============================================================
+# Signing & secrets
+# ============================================================
+# Release keystore — never commit
+*.jks
+*.keystore
+# Debug keystore base64 (decoded runtime artifact)
+debug.keystore
+# Environment variables / API keys
+.env
+# Keep .env.example (template without real values)
+!.env.example
+
+# ============================================================
+# WorkBuddy AI project context (local dev tool)
+# ============================================================
+.workbuddy/
+
+# ============================================================
+# Misc
+# ============================================================
+*.log
+*.tmp
+.build-outputs/
+
+debug.keystore.base64
+/.idea/
+app/release/
+app/*.txt

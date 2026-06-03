@@ -1,0 +1,6 @@
+{
+  "name": "Today Wallpaper",
+  "description": "每日壁纸软件，具有台历式沉浸今日壁纸、分类推荐、中英双语、收藏与自定义图集功能。 Daily wallpaper app featuring a calendar-style immersive homepage, curated categories, custom collections, and bilingual support.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
