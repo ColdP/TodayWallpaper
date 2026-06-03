@@ -1,5 +1,7 @@
 # Contributing to Today Wallpaper
 
+**[中文版](CONTRIBUTING_ZH.md)**
+
 Thank you for your interest in contributing! Here are a few guidelines to keep things smooth.
 
 ## Getting Started

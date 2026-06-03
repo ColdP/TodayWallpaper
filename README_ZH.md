@@ -114,7 +114,7 @@ TodayWallpaper/
 
 ## 贡献
 
-欢迎提交 Pull Request！请阅读 [CONTRIBUTING.md](CONTRIBUTING.md) 了解如何开始、提交 PR 或反馈问题。
+欢迎提交 Pull Request！请阅读 [CONTRIBUTING_ZH.md](CONTRIBUTING_ZH.md) 了解如何开始、提交 PR 或反馈问题。
 
 ---
 
