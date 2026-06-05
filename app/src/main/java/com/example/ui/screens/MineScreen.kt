@@ -73,7 +73,6 @@ fun MineScreen(
     val currentLang by viewModel.language.collectAsState()
     val homeType by viewModel.homeWallpaperType.collectAsState()
     val categories by viewModel.categories.collectAsState()
-
     // UI Interactive States
     var showCreateCollectionDialog by remember { mutableStateOf(false) }
     var selectedCollectionForDetail by remember { mutableStateOf<WallpaperCollection?>(null) }
@@ -496,9 +495,125 @@ fun MineScreen(
 
                             HorizontalDivider(color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.06f))
 
+                            // Custom Splash Screen row
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clickable {
+                                        val intent = android.content.Intent(context, btm.m.todaywallpaper.ui.screens.SplashSettingActivity::class.java)
+                                        context.startActivity(intent)
+                                    }
+                                    .padding(16.dp),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Icon(
+                                        imageVector = Icons.Filled.AutoAwesome,
+                                        contentDescription = "Custom Splash",
+                                        tint = MaterialTheme.colorScheme.primary,
+                                        modifier = Modifier.size(20.dp)
+                                    )
+                                    Spacer(modifier = Modifier.width(12.dp))
+                                    Text(
+                                        text = viewModel.getTranslation("自定义开屏界面", "Custom Splash Screen"),
+                                        fontSize = 14.sp,
+                                        fontWeight = FontWeight.Medium,
+                                        color = MaterialTheme.colorScheme.onSurface
+                                    )
+                                }
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    val splashSp = context.getSharedPreferences("app_gallery_prefs", android.content.Context.MODE_PRIVATE)
+                                    val splashModeVal = splashSp.getString("splash_mode", "app_icon") ?: "app_icon"
+                                    val modeLabel = when (splashModeVal) {
+                                        "app_icon" -> viewModel.getTranslation("默认", "Default")
+                                        "select" -> viewModel.getTranslation("已选图", "Selected")
+                                        "random" -> viewModel.getTranslation("随机", "Random")
+                                        "upload" -> viewModel.getTranslation("已上传", "Uploaded")
+                                        else -> viewModel.getTranslation("默认", "Default")
+                                    }
+                                    Text(
+                                        text = modeLabel,
+                                        fontSize = 12.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = if (splashModeVal != "app_icon") MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.secondary
+                                    )
+                                    Spacer(modifier = Modifier.width(4.dp))
+                                    Icon(
+                                        imageVector = Icons.AutoMirrored.Filled.KeyboardArrowRight,
+                                        contentDescription = "Arrow",
+                                        tint = MaterialTheme.colorScheme.secondary,
+                                        modifier = Modifier.size(16.dp)
+                                    )
+                                }
+                            }
+
+                            HorizontalDivider(color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.06f))
+
+                            // Auto Switch Wallpaper row
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clickable {
+                                        val intent = android.content.Intent(context, btm.m.todaywallpaper.ui.screens.AutoSwitchWallpaperActivity::class.java)
+                                        context.startActivity(intent)
+                                    }
+                                    .padding(16.dp),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Icon(
+                                        imageVector = Icons.Filled.Autorenew,
+                                        contentDescription = "Auto Switch",
+                                        tint = MaterialTheme.colorScheme.primary,
+                                        modifier = Modifier.size(20.dp)
+                                    )
+                                    Spacer(modifier = Modifier.width(12.dp))
+                                    Text(
+                                        text = viewModel.getTranslation("自动切换桌面壁纸", "Auto Switch Wallpaper"),
+                                        fontSize = 14.sp,
+                                        fontWeight = FontWeight.Medium,
+                                        color = MaterialTheme.colorScheme.onSurface
+                                    )
+                                }
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    val autoSwitchSp = context.getSharedPreferences("app_gallery_prefs", android.content.Context.MODE_PRIVATE)
+                                    val isAutoSwitchOn = autoSwitchSp.getBoolean("auto_switch_enabled", false)
+                                    Text(
+                                        text = if (isAutoSwitchOn) viewModel.getTranslation("已开启", "On") else viewModel.getTranslation("已关闭", "Off"),
+                                        fontSize = 12.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = if (isAutoSwitchOn) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.secondary
+                                    )
+                                    Spacer(modifier = Modifier.width(4.dp))
+                                    Icon(
+                                        imageVector = Icons.AutoMirrored.Filled.KeyboardArrowRight,
+                                        contentDescription = "Arrow",
+                                        tint = MaterialTheme.colorScheme.secondary,
+                                        modifier = Modifier.size(16.dp)
+                                    )
+                                }
+                            }
+
+                            HorizontalDivider(color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.06f))
+
                             // Pexels API Key Config row
                             val pexelsApiKey by viewModel.pexelsApiKey.collectAsState()
                             var showPexelsKeyEditDialog by remember { mutableStateOf(false) }
+
+                            // WebView result launcher for API key capture
+                            val webviewResultLauncher = rememberLauncherForActivityResult(
+                                contract = ActivityResultContracts.StartActivityForResult()
+                            ) { result ->
+                                if (result.resultCode == android.app.Activity.RESULT_OK) {
+                                    val detectedKey = result.data?.getStringExtra("detected_api_key")
+                                    if (!detectedKey.isNullOrEmpty()) {
+                                        viewModel.updatePexelsApiKey(detectedKey)
+                                        Toast.makeText(context, viewModel.getTranslation("API Key 已自动保存！", "API Key saved automatically!"), Toast.LENGTH_SHORT).show()
+                                    }
+                                }
+                            }
 
                             Row(
                                 modifier = Modifier
@@ -571,6 +686,38 @@ fun MineScreen(
                                                 modifier = Modifier.fillMaxWidth().testTag("mine_pexels_api_key_field"),
                                                 shape = RoundedCornerShape(10.dp)
                                             )
+                                            Spacer(modifier = Modifier.height(12.dp))
+                                            // Register API Key via WebView button
+                                            OutlinedButton(
+                                                onClick = {
+                                                    showPexelsKeyEditDialog = false
+                                                    val intent = android.content.Intent(context, PexelsWebViewActivity::class.java)
+                                                    webviewResultLauncher.launch(intent)
+                                                },
+                                                modifier = Modifier.fillMaxWidth(),
+                                                shape = RoundedCornerShape(12.dp)
+                                            ) {
+                                                Icon(
+                                                    imageVector = Icons.Filled.OpenInBrowser,
+                                                    contentDescription = "Register",
+                                                    tint = MaterialTheme.colorScheme.primary,
+                                                    modifier = Modifier.size(18.dp)
+                                                )
+                                                Spacer(modifier = Modifier.width(8.dp))
+                                                Column {
+                                                    Text(
+                                                        text = viewModel.getTranslation("还没有 API Key？点击注册", "Don't have an API Key? Register here"),
+                                                        fontSize = 13.sp,
+                                                        fontWeight = FontWeight.Bold,
+                                                        color = MaterialTheme.colorScheme.primary
+                                                    )
+                                                    Text(
+                                                        text = viewModel.getTranslation("打开 Pexels API 页面，注册后自动获取", "Open Pexels API page, key will be auto-captured"),
+                                                        fontSize = 10.sp,
+                                                        color = MaterialTheme.colorScheme.secondary
+                                                    )
+                                                }
+                                            }
                                         }
                                     },
                                     confirmButton = {

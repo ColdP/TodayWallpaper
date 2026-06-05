@@ -32,6 +32,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -397,7 +398,6 @@ fun CategoriesScreen(
                                 modifier = Modifier
                                     .fillMaxWidth()
                                     .testTag("custom_title_input"),
-                                singleLine = true,
                                 shape = RoundedCornerShape(10.dp)
                             )
 
@@ -406,11 +406,11 @@ fun CategoriesScreen(
                             OutlinedTextField(
                                 value = searchQuery,
                                 onValueChange = { searchQuery = it },
-                                label = { Text(text = viewModel.getTranslation("Pexels 检索英文词 (例: cats)", "Pexels query word (e.g., cats)")) },
+                                label = { Text(text = viewModel.getTranslation("Pexels 检索英文词 (例: cute cats sleeping)", "Pexels query (e.g., cute cats sleeping)")) },
+                                placeholder = { Text(text = viewModel.getTranslation("支持多词检索，词数不限", "Multi-word queries supported, no length limit"), fontSize = 11.sp) },
                                 modifier = Modifier
                                     .fillMaxWidth()
                                     .testTag("custom_query_input"),
-                                singleLine = true,
                                 shape = RoundedCornerShape(10.dp)
                             )
 
@@ -423,7 +423,7 @@ fun CategoriesScreen(
                                 modifier = Modifier
                                     .fillMaxWidth()
                                     .testTag("custom_desc_input"),
-                                singleLine = true,
+                                maxLines = 3,
                                 shape = RoundedCornerShape(10.dp)
                             )
                         } else {
@@ -829,6 +829,7 @@ fun CategoryGridView(
     onViewDetail: (String, String, String?, String) -> Unit
 ) {
     val gridState by viewModel.categoryGridState.collectAsState()
+    val isLoadingMore by viewModel.isLoadingMore.collectAsState()
     val title = if (viewModel.language.collectAsState().value == "zh") category.zhTitle else category.enTitle
 
     Column(
@@ -919,6 +920,35 @@ fun CategoryGridView(
                                         wallpaper.imageUrl,
                                         wallpaper.author,
                                         wallpaper.source
+                                    )
+                                }
+                            }
+                            // Infinite scroll: trigger load more when near the end
+                            if (isLoadingMore) {
+                                item(span = { androidx.compose.foundation.lazy.grid.GridItemSpan(2) }) {
+                                    Box(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .padding(vertical = 16.dp),
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        CircularProgressIndicator(
+                                            color = MaterialTheme.colorScheme.primary,
+                                            modifier = Modifier.size(28.dp),
+                                            strokeWidth = 3.dp
+                                        )
+                                    }
+                                }
+                            } else {
+                                item(span = { androidx.compose.foundation.lazy.grid.GridItemSpan(2) }) {
+                                    // Invisible trigger item: when this becomes visible, load more
+                                    LaunchedEffect(list.size) {
+                                        viewModel.loadMoreCategoryWallpapers()
+                                    }
+                                    Box(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .height(1.dp)
                                     )
                                 }
                             }

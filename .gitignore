@@ -49,5 +49,6 @@ debug.keystore
 
 debug.keystore.base64
 /.idea/
+/problems/
 app/release/
 app/*.txt

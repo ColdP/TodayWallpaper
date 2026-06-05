@@ -19,6 +19,9 @@ interface WallpaperDao {
     @Query("SELECT * FROM favorite_wallpapers ORDER BY savedAt DESC")
     fun getAllFavorites(): Flow<List<FavoriteWallpaper>>
 
+    @Query("SELECT * FROM favorite_wallpapers ORDER BY savedAt DESC")
+    suspend fun getAllFavoritesSync(): List<FavoriteWallpaper>
+
     @Query("SELECT EXISTS(SELECT 1 FROM favorite_wallpapers WHERE id = :id)")
     fun isWallpaperFavorite(id: String): Flow<Boolean>
 
@@ -55,6 +58,9 @@ interface WallpaperDao {
 
     @Query("SELECT * FROM collection_items WHERE collectionId = :collectionId ORDER BY addedAt DESC")
     fun getItemsForCollection(collectionId: Int): Flow<List<CollectionItem>>
+
+    @Query("SELECT * FROM collection_items WHERE collectionId = :collectionId ORDER BY addedAt DESC")
+    suspend fun getItemsForCollectionSync(collectionId: Int): List<CollectionItem>
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertCollectionItem(item: CollectionItem)

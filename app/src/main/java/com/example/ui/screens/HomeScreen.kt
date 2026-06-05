@@ -39,6 +39,12 @@ import btm.m.todaywallpaper.ui.viewmodel.WallpaperUiState
 import btm.m.todaywallpaper.ui.viewmodel.WallpaperViewModel
 import java.text.SimpleDateFormat
 import java.util.*
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.input.pointer.positionChange
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.gestures.drag
+import androidx.compose.ui.input.pointer.PointerEventPass
 
 @OptIn(ExperimentalAnimationApi::class)
 @Composable
@@ -51,6 +57,9 @@ fun HomeScreen(
     val context = LocalContext.current
     val todayState by viewModel.todayWallpaper.collectAsState()
     val settingState by viewModel.wallpaperSettingState.collectAsState()
+    val gestureEnabled by viewModel.homeGestureEnabled.collectAsState()
+    val hasPrevious by viewModel.hasPreviousWallpaper.collectAsState()
+    val hasNext by viewModel.hasNextWallpaper.collectAsState()
 
     DisposableEffect(homeRefreshGlassView) {
         onDispose {
@@ -120,11 +129,7 @@ fun HomeScreen(
                     AsyncImage(
                         model = wp.imageUrl,
                         contentDescription = "Today Wallpaper",
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .clickable {
-                                onViewDetail(wp.id, wp.imageUrl, wp.author, wp.source)
-                            },
+                        modifier = Modifier.fillMaxSize(),
                         contentScale = ContentScale.Crop
                     )
                 }
@@ -145,7 +150,56 @@ fun HomeScreen(
                         )
                 )
  
-                // 2. Immersive Content Layout conforming with safe system bars padding
+                // 2. Gesture overlay - transparent Box that catches swipe and tap gestures
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .pointerInput(wallpaper.id, gestureEnabled) {
+                            awaitEachGesture {
+                                val down = awaitFirstDown(requireUnconsumed = true)
+                                if (!gestureEnabled) {
+                                    // Gesture disabled: wait for up and treat as tap
+                                    var released = false
+                                    while (!released) {
+                                        val event = awaitPointerEvent(PointerEventPass.Main)
+                                        released = event.changes.all { !it.pressed }
+                                    }
+                                    onViewDetail(wallpaper.id, wallpaper.imageUrl, wallpaper.author, wallpaper.source)
+                                    return@awaitEachGesture
+                                }
+                                val startX = down.position.x
+                                val startY = down.position.y
+                                var totalDx = 0f
+                                var totalDy = 0f
+                                // Wait for drag to start
+                                val up = drag(down.id) { change ->
+                                    totalDx += change.positionChange().x
+                                    totalDy += change.positionChange().y
+                                    change.consume()
+                                }
+                                val threshold = 80f
+                                val absDx = kotlin.math.abs(totalDx)
+                                val absDy = kotlin.math.abs(totalDy)
+                                if (absDx > threshold || absDy > threshold) {
+                                    when {
+                                        absDx >= absDy -> {
+                                            if (totalDx < 0) viewModel.goToNextWallpaper()
+                                            else viewModel.goToPreviousWallpaper()
+                                        }
+                                        else -> {
+                                            if (totalDy < 0) viewModel.goToNextWallpaper()
+                                            else viewModel.goToPreviousWallpaper()
+                                        }
+                                    }
+                                } else {
+                                    // Short drag = tap → open detail
+                                    onViewDetail(wallpaper.id, wallpaper.imageUrl, wallpaper.author, wallpaper.source)
+                                }
+                            }
+                        }
+                )
+ 
+                // 3. Immersive Content Layout conforming with safe system bars padding
                 Box(
                     modifier = Modifier
                         .fillMaxSize()
@@ -153,38 +207,38 @@ fun HomeScreen(
                         // Since bottom has floating capsule, padding bottom moves title safely above it
                         .padding(start = 24.dp, end = 24.dp, top = 20.dp, bottom = 100.dp)
                 ) {
-                    // Top Row: contains "Today Wallpaper" on Left and circular Refresh on Right
+                    // Top Row: contains "Today Wallpaper" on Left and capsule nav on Right
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
                             .align(Alignment.TopCenter),
                         horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.Top
+                        verticalAlignment = Alignment.CenterVertically
                     ) {
                         Column {
                             Text(
                                 text = "Today",
                                 color = Color.White,
-                                fontSize = 34.sp,
+                                fontSize = 26.sp,
                                 fontWeight = FontWeight.Black,
-                                lineHeight = 36.sp
+                                lineHeight = 28.sp
                             )
                             Text(
                                 text = "Wallpaper",
                                 color = Color.White,
-                                fontSize = 34.sp,
+                                fontSize = 26.sp,
                                 fontWeight = FontWeight.Black,
-                                lineHeight = 36.sp
+                                lineHeight = 28.sp
                             )
                         }
  
-                        // Circular glassmorphic Refresh Button with safe Compose styling to avoid recursive drawing loops
-                        Box(
+                        // Capsule with Refresh | Prev | Next buttons
+                        Row(
                             modifier = Modifier
-                                .size(44.dp)
-                                .clip(RoundedCornerShape(percent = 50))
-                                .background(Color.White.copy(alpha = 0.05f))
-                                .border(1.dp, Color.White.copy(alpha = 0.22f), RoundedCornerShape(percent = 50))
+                                .clip(RoundedCornerShape(50))
+                                .background(Color.White.copy(alpha = 0.08f))
+                                .border(1.dp, Color.White.copy(alpha = 0.22f), RoundedCornerShape(50))
+                                .padding(horizontal = 4.dp, vertical = 4.dp)
                                 .onGloballyPositioned { coordinates ->
                                     val size = coordinates.size
                                     val position = coordinates.positionInRoot()
@@ -201,7 +255,6 @@ fun HomeScreen(
                                             hg.translationX = position.x
                                             hg.translationY = position.y
                                             
-                                            // Configure glass styling for the circular refresh button
                                             val buttonCornerRadiusPx = 22f * context.resources.displayMetrics.density
                                             val blurRadius = 8f * context.resources.displayMetrics.density
                                             btm.m.todaywallpaper.MainActivity.safeConfigure(
@@ -216,17 +269,75 @@ fun HomeScreen(
                                             )
                                         }
                                     }
-                                }
-                                .clickable { viewModel.fetchTodayWallpaper() }
-                                .testTag("home_refresh_btn"),
-                            contentAlignment = Alignment.Center
+                                },
+                            verticalAlignment = Alignment.CenterVertically
                         ) {
-                            Icon(
-                                imageVector = Icons.Outlined.Refresh,
-                                contentDescription = "Refresh",
-                                tint = Color.White,
-                                modifier = Modifier.size(22.dp)
+                            // Refresh button
+                            Box(
+                                modifier = Modifier
+                                    .size(36.dp)
+                                    .clip(RoundedCornerShape(50))
+                                    .clickable { viewModel.fetchTodayWallpaper() }
+                                    .testTag("home_refresh_btn"),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Outlined.Refresh,
+                                    contentDescription = "Refresh",
+                                    tint = Color.White,
+                                    modifier = Modifier.size(20.dp)
+                                )
+                            }
+                            // Divider between Refresh and Prev
+                            Box(
+                                modifier = Modifier
+                                    .width(1.dp)
+                                    .height(20.dp)
+                                    .background(Color.White.copy(alpha = 0.2f))
                             )
+                            // Previous button
+                            Box(
+                                modifier = Modifier
+                                    .size(36.dp)
+                                    .clip(RoundedCornerShape(50))
+                                    .clickable(enabled = hasPrevious) {
+                                        viewModel.goToPreviousWallpaper()
+                                    }
+                                    .testTag("home_prev_btn"),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Filled.SkipPrevious,
+                                    contentDescription = "Previous",
+                                    tint = if (hasPrevious) Color.White else Color.White.copy(alpha = 0.3f),
+                                    modifier = Modifier.size(20.dp)
+                                )
+                            }
+                            // Divider between Prev and Next
+                            Box(
+                                modifier = Modifier
+                                    .width(1.dp)
+                                    .height(20.dp)
+                                    .background(Color.White.copy(alpha = 0.2f))
+                            )
+                            // Next button
+                            Box(
+                                modifier = Modifier
+                                    .size(36.dp)
+                                    .clip(RoundedCornerShape(50))
+                                    .clickable {
+                                        viewModel.goToNextWallpaper()
+                                    }
+                                    .testTag("home_next_btn"),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Filled.SkipNext,
+                                    contentDescription = "Next",
+                                    tint = Color.White,
+                                    modifier = Modifier.size(20.dp)
+                                )
+                            }
                         }
                     }
  

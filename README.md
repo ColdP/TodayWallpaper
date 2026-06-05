@@ -121,6 +121,8 @@ Pull requests are welcome! Please read [CONTRIBUTING.md](CONTRIBUTING.md) for gu
 
 This project is licensed under the [MIT License](LICENSE).
 
+See [OPEN_SOURCE_LICENSES.md](OPEN_SOURCE_LICENSES.md) for the full list of third-party libraries and their licenses.
+
 ---
 
 <p align="center">

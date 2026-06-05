@@ -121,6 +121,8 @@ TodayWallpaper/
 
 本项目基于 [MIT 许可证](LICENSE) 开源。
 
+第三方开源库及许可证详见 [OPEN_SOURCE_LICENSES.md](OPEN_SOURCE_LICENSES.md)。
+
 ---
 
 <p align="center">

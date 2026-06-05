@@ -69,6 +69,7 @@ fun AboutScreen(
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
+    var showLicensesPage by remember { mutableStateOf(false) }
 
     val view = androidx.compose.ui.platform.LocalView.current
     val darkTheme = isSystemInDarkTheme()
@@ -116,6 +117,15 @@ fun AboutScreen(
     val year = Calendar.getInstance().get(Calendar.YEAR)
     val appIconBitmap = remember(context) {
         context.packageManager.getApplicationIcon(context.packageName).toBitmap().asImageBitmap()
+    }
+
+    if (showLicensesPage) {
+        OpenSourceLicensesScreen(
+            viewModel = viewModel,
+            onBack = { showLicensesPage = false },
+            modifier = modifier.fillMaxSize()
+        )
+        return
     }
 
     Box(
@@ -338,6 +348,48 @@ fun AboutScreen(
                                 subtitle = "https://btm-m.live",
                                 onClick = { openUrl(context, "https://btm-m.live") }
                             )
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(14.dp))
+
+                    // Open Source Licenses Card
+                    Card(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable { showLicensesPage = true },
+                        shape = RoundedCornerShape(24.dp),
+                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+                    ) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(16.dp),
+                            horizontalArrangement = Arrangement.Start,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Icon(
+                                imageVector = Icons.AutoMirrored.Filled.OpenInNew,
+                                contentDescription = viewModel.getTranslation("开源代码声明", "Open Source Licenses"),
+                                tint = MaterialTheme.colorScheme.primary,
+                                modifier = Modifier.size(18.dp)
+                            )
+                            Spacer(modifier = Modifier.width(12.dp))
+                            Column(horizontalAlignment = Alignment.Start) {
+                                Text(
+                                    text = viewModel.getTranslation("开源代码声明", "Open Source Licenses"),
+                                    fontSize = 14.sp,
+                                    fontWeight = FontWeight.Medium,
+                                    color = MaterialTheme.colorScheme.onSurface,
+                                    textAlign = TextAlign.Start
+                                )
+                                Text(
+                                    text = viewModel.getTranslation("查看使用的第三方开源库许可信息", "View third-party open source library licenses"),
+                                    fontSize = 12.sp,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    textAlign = TextAlign.Start
+                                )
+                            }
                         }
                     }
 
