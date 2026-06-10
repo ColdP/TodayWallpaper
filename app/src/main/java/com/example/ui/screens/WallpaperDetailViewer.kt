@@ -132,7 +132,17 @@ fun WallpaperDetailViewer(
 
     val density = androidx.compose.ui.platform.LocalDensity.current
     val detailCornerRadiusPx = with(density) { 36.dp.toPx() }
-    val detailBlurRadius = 8f * context.resources.displayMetrics.density
+    val liquidGlassBlurVal by viewModel.liquidGlassBlur.collectAsState()
+    val detailBlurRadiusPx = with(density) { liquidGlassBlurVal.dp.toPx() }
+    val lgRefractionHeight by viewModel.lgRefractionHeight.collectAsState()
+    val lgRefractionOffset by viewModel.lgRefractionOffset.collectAsState()
+    val lgTintAlpha by viewModel.lgTintAlpha.collectAsState()
+    val lgDispersion by viewModel.lgDispersion.collectAsState()
+    val lgDraggable by viewModel.lgDraggable.collectAsState()
+    val lgElastic by viewModel.lgElastic.collectAsState()
+    val lgTouchEffect by viewModel.lgTouchEffect.collectAsState()
+    val lgRefractionHeightPx = with(density) { lgRefractionHeight.dp.toPx() }
+    val lgRefractionOffsetPx = with(density) { lgRefractionOffset.dp.toPx() }
 
     if (!renderBackgroundOnly) {
         BackHandler {
@@ -154,20 +164,29 @@ fun WallpaperDetailViewer(
         }
     }
 
-    DisposableEffect(detailGlassView) {
+    DisposableEffect(detailGlassView, detailBlurRadiusPx, lgRefractionHeightPx, lgRefractionOffsetPx, lgTintAlpha, lgDispersion, lgDraggable, lgElastic, lgTouchEffect) {
         if (detailGlassView == null || renderBackgroundOnly) return@DisposableEffect onDispose {}
 
         val applyDetailGlassConfig = {
             if (detailGlassView.width > 0 && detailGlassView.height > 0) {
-                btm.m.todaywallpaper.MainActivity.safeConfigure(
-                    view = detailGlassView,
-                    red = 0.0f,
-                    green = 0.0f,
-                    blue = 0.0f,
-                    alpha = 0.2f,
-                    cornerRadius = detailCornerRadiusPx,
-                    blurRadius = detailBlurRadius
-                )
+                try {
+                    btm.m.todaywallpaper.MainActivity.safeConfigure(
+                        view = detailGlassView,
+                        red = 0.0f,
+                        green = 0.0f,
+                        blue = 0.0f,
+                        alpha = lgTintAlpha,
+                        cornerRadius = detailCornerRadiusPx,
+                        blurRadius = detailBlurRadiusPx,
+                        refractionHeight = lgRefractionHeightPx
+                    )
+                    detailGlassView.setRefractionOffset(lgRefractionOffsetPx)
+                    if (lgDispersion > 0f) detailGlassView.setDispersion(lgDispersion)
+                    detailGlassView.setDraggableEnabled(lgDraggable)
+                    detailGlassView.setElasticEnabled(lgElastic)
+                    detailGlassView.setTouchEffectEnabled(lgTouchEffect)
+                    detailGlassView.invalidate()
+                } catch (_: Exception) {}
             }
         }
 
@@ -183,6 +202,7 @@ fun WallpaperDetailViewer(
         if (detailGlassView.width > 0 && detailGlassView.height > 0) {
             applyDetailGlassConfig()
         }
+        detailGlassView.post { applyDetailGlassConfig() }
 
         onDispose {
             detailGlassView.removeOnLayoutChangeListener(listener)
@@ -819,7 +839,7 @@ fun WallpaperDetailViewer(
             CreateCollectionDialog(
                 viewModel = viewModel,
                 onDismiss = { showCreateAlbumInline = false },
-                onConfirm = { name, desc ->
+                onConfirm = { name, desc, _ ->
                     viewModel.createNewCollection(name, desc) { id ->
                         showCreateAlbumInline = false
                         // Automatically attach to this newly generated album!

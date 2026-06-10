@@ -118,6 +118,10 @@ class WallpaperRepository(private val context: Context) {
         dao.updateCollectionItemMeta(itemId, authorName, source)
     }
 
+    suspend fun updateCollectionCover(collectionId: Int, coverUrl: String) = withContext(Dispatchers.IO) {
+        dao.updateCollectionCover(collectionId, coverUrl)
+    }
+
 
     // ==========================================
     // 2. REMOTE WALLPAPER API FETCHING

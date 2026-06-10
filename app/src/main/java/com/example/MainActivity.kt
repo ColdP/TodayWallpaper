@@ -352,22 +352,40 @@ fun MainNavigationContainer(
     val isAboutPageVisible by viewModel.isAboutPageVisible.collectAsState()
     val language by viewModel.language.collectAsState()
     val isDark = isSystemInDarkTheme()
+    val liquidGlassBlur by viewModel.liquidGlassBlur.collectAsState()
+    val refractionHeight by viewModel.lgRefractionHeight.collectAsState()
+    val refractionOffset by viewModel.lgRefractionOffset.collectAsState()
+    val tintAlpha by viewModel.lgTintAlpha.collectAsState()
+    val dispersion by viewModel.lgDispersion.collectAsState()
+    val draggable by viewModel.lgDraggable.collectAsState()
+    val elastic by viewModel.lgElastic.collectAsState()
+    val touchEffect by viewModel.lgTouchEffect.collectAsState()
 
     val density = LocalDensity.current
     val cornerRadiusPx = with(density) { 299.dp.toPx() }
-    val blurRadius = 8f * glassView.context.resources.displayMetrics.density
+    val blurRadiusPx = with(density) { liquidGlassBlur.dp.toPx() }
+    val refractionHeightPx = with(density) { refractionHeight.dp.toPx() }
+    val refractionOffsetPx = with(density) { refractionOffset.dp.toPx() }
 
-    val applyGlassConfig = remember(isDark, cornerRadiusPx, blurRadius) {
+    val applyGlassConfig = remember(isDark, cornerRadiusPx, blurRadiusPx, tintAlpha, refractionHeightPx, refractionOffsetPx, dispersion, draggable, elastic, touchEffect) {
         {
             if (glassView.width > 0 && glassView.height > 0) {
                 try {
-                    glassView.setTintColorRed(if (isDark) 0.0f else 1.0f)
-                    glassView.setTintColorGreen(if (isDark) 0.0f else 1.0f)
-                    glassView.setTintColorBlue(if (isDark) 0.0f else 1.0f)
-                    glassView.setTintAlpha(if (isDark) 0.08f else 0.05f)
-                    glassView.setCornerRadius(cornerRadiusPx)
-                    glassView.setBlurRadius(blurRadius)
-                    glassView.setRefractionHeight(12f)
+                    btm.m.todaywallpaper.MainActivity.safeConfigure(
+                        view = glassView,
+                        red = if (isDark) 0.0f else 1.0f,
+                        green = if (isDark) 0.0f else 1.0f,
+                        blue = if (isDark) 0.0f else 1.0f,
+                        alpha = tintAlpha,
+                        cornerRadius = cornerRadiusPx,
+                        blurRadius = blurRadiusPx,
+                        refractionHeight = refractionHeightPx
+                    )
+                    glassView.setRefractionOffset(refractionOffsetPx)
+                    if (dispersion > 0f) glassView.setDispersion(dispersion)
+                    glassView.setDraggableEnabled(draggable)
+                    glassView.setElasticEnabled(elastic)
+                    glassView.setTouchEffectEnabled(touchEffect)
                 } catch (e: Exception) {
                     e.printStackTrace()
                 }
@@ -375,22 +393,47 @@ fun MainNavigationContainer(
         }
     }
 
-    LaunchedEffect(isDark, cornerRadiusPx, blurRadius) {
+    LaunchedEffect(isDark, cornerRadiusPx, blurRadiusPx, tintAlpha, refractionHeightPx, refractionOffsetPx, dispersion, draggable, elastic, touchEffect) {
         applyGlassConfig()
     }
 
-    DisposableEffect(glassView) {
+    DisposableEffect(glassView, blurRadiusPx, isDark, tintAlpha, refractionHeightPx, refractionOffsetPx, dispersion, draggable, elastic, touchEffect) {
+        val applyAndInvalidate = {
+            if (glassView.width > 0 && glassView.height > 0) {
+                try {
+                    btm.m.todaywallpaper.MainActivity.safeConfigure(
+                        view = glassView,
+                        red = if (isDark) 0.0f else 1.0f,
+                        green = if (isDark) 0.0f else 1.0f,
+                        blue = if (isDark) 0.0f else 1.0f,
+                        alpha = tintAlpha,
+                        cornerRadius = cornerRadiusPx,
+                        blurRadius = blurRadiusPx,
+                        refractionHeight = refractionHeightPx
+                    )
+                    glassView.setRefractionOffset(refractionOffsetPx)
+                    if (dispersion > 0f) glassView.setDispersion(dispersion)
+                    glassView.setDraggableEnabled(draggable)
+                    glassView.setElasticEnabled(elastic)
+                    glassView.setTouchEffectEnabled(touchEffect)
+                    glassView.invalidate()
+                } catch (e: Exception) {
+                    e.printStackTrace()
+                }
+            }
+        }
         val listener = View.OnLayoutChangeListener { _, left, top, right, bottom, _, _, _, _ ->
             val w = right - left
             val h = bottom - top
             if (w > 0 && h > 0) {
-                applyGlassConfig()
+                applyAndInvalidate()
             }
         }
         glassView.addOnLayoutChangeListener(listener)
         if (glassView.width > 0 && glassView.height > 0) {
-            applyGlassConfig()
+            applyAndInvalidate()
         }
+        glassView.post { applyAndInvalidate() }
         onDispose {
             glassView.removeOnLayoutChangeListener(listener)
         }

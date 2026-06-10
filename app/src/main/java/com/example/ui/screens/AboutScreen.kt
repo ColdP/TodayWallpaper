@@ -5,6 +5,13 @@ import android.content.Context
 import android.content.Intent
 import android.os.Build
 import androidx.activity.compose.PredictiveBackHandler
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
+import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -12,7 +19,6 @@ import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -27,6 +33,8 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.OpenInNew
+import androidx.compose.material.icons.filled.Code
+import androidx.compose.material.icons.filled.Update
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.HorizontalDivider
@@ -119,257 +127,315 @@ fun AboutScreen(
         context.packageManager.getApplicationIcon(context.packageName).toBitmap().asImageBitmap()
     }
 
-    if (showLicensesPage) {
-        OpenSourceLicensesScreen(
-            viewModel = viewModel,
-            onBack = { showLicensesPage = false },
-            modifier = modifier.fillMaxSize()
-        )
-        return
-    }
-
-    Box(
-        modifier = modifier
-            .fillMaxSize()
-            .background(MaterialTheme.colorScheme.background)
-    ) {
-        Scaffold(
-            modifier = Modifier
-                .fillMaxSize()
-                .graphicsLayer(
-                    scaleX = scale,
-                    scaleY = scale,
-                    translationX = with(androidx.compose.ui.platform.LocalDensity.current) { translationXDp.toPx() },
-                    alpha = alpha,
-                    clip = cornerRadius > 0.dp,
-                    shape = RoundedCornerShape(cornerRadius)
-                ),
-            containerColor = MaterialTheme.colorScheme.background
-        ) { innerPadding ->
-            Column(
-                modifier = Modifier
+    AnimatedContent(
+        targetState = showLicensesPage,
+        transitionSpec = {
+            (fadeIn(tween(220)) + slideInVertically(initialOffsetY = { it / 8 }))
+                .togetherWith(fadeOut(tween(180)) + slideOutVertically(targetOffsetY = { it / 8 }))
+        },
+        label = "AboutLicensesTransition"
+    ) { isLicensesPage ->
+        if (isLicensesPage) {
+            OpenSourceLicensesScreen(
+                viewModel = viewModel,
+                onBack = { showLicensesPage = false },
+                modifier = modifier.fillMaxSize()
+            )
+        } else {
+            Box(
+                modifier = modifier
                     .fillMaxSize()
-                    .padding(innerPadding)
+                    .background(MaterialTheme.colorScheme.background)
             ) {
-                // Title Row (same pattern as StyleSettingActivity)
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 16.dp, vertical = 10.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    IconButton(
-                        onClick = onBack,
-                        modifier = Modifier.size(32.dp)
-                    ) {
-                        Icon(
-                            imageVector = Icons.AutoMirrored.Filled.ArrowBack,
-                            contentDescription = viewModel.getTranslation("返回", "Back"),
-                            tint = MaterialTheme.colorScheme.onBackground,
-                            modifier = Modifier.size(24.dp)
-                        )
-                    }
-                    Spacer(modifier = Modifier.width(16.dp))
-                    Text(
-                        text = viewModel.getTranslation("关于", "About"),
-                        fontSize = 22.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = MaterialTheme.colorScheme.onBackground
-                    )
-                }
-
-                // Scrollable Content
-                Column(
+                Scaffold(
                     modifier = Modifier
                         .fillMaxSize()
-                        .verticalScroll(rememberScrollState())
-                        .padding(horizontal = 16.dp)
-                ) {
-                    Spacer(modifier = Modifier.height(12.dp))
-
-                    // App Info Card
-                    Card(
-                        modifier = Modifier.fillMaxWidth(),
-                        shape = RoundedCornerShape(24.dp),
-                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
-                    ) {
-                        Column(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(16.dp),
-                            horizontalAlignment = Alignment.Start,
-                            verticalArrangement = Arrangement.Top
-                        ) {
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.Start
-                            ) {
-                                Box(
-                                    modifier = Modifier
-                                        .size(72.dp)
-                                        .clip(RoundedCornerShape(20.dp))
-                                        .background(
-                                            Brush.linearGradient(
-                                                colors = listOf(
-                                                    MaterialTheme.colorScheme.primary.copy(alpha = 0.2f),
-                                                    MaterialTheme.colorScheme.primary.copy(alpha = 0.1f)
-                                                )
-                                            )
-                                        ),
-                                    contentAlignment = Alignment.Center
-                                ) {
-                                    Image(
-                                        bitmap = appIconBitmap,
-                                        contentDescription = viewModel.getTranslation("应用图标", "App icon"),
-                                        modifier = Modifier.size(42.dp),
-                                        contentScale = ContentScale.Fit
-                                    )
-                                }
-                                    Spacer(modifier = Modifier.size(14.dp))
-                                    Column(horizontalAlignment = Alignment.Start) {
-                                        Text(
-                                            text = context.getString(btm.m.todaywallpaper.R.string.app_name),
-                                            fontSize = 20.sp,
-                                            fontWeight = FontWeight.ExtraBold,
-                                            color = MaterialTheme.colorScheme.onSurface,
-                                            textAlign = TextAlign.Start
-                                        )
-                                        Spacer(modifier = Modifier.height(2.dp))
-                                        Text(
-                                            text = appVersion,
-                                            fontSize = 13.sp,
-                                            fontWeight = FontWeight.Medium,
-                                            color = MaterialTheme.colorScheme.secondary,
-                                            textAlign = TextAlign.Start
-                                        )
-                                        Spacer(modifier = Modifier.height(2.dp))
-                                        Text(
-                                            text = "Developed by btm_m",
-                                            fontSize = 12.sp,
-                                            color = MaterialTheme.colorScheme.secondary,
-                                            textAlign = TextAlign.Start
-                                        )
-                                    }
-                            }
-
-                            Spacer(modifier = Modifier.height(12.dp))
-
-                            Text(
-                                text = viewModel.getTranslation(
-                                    "一个基于Jetpack Compose + Kotlin的壁纸应用。",
-                                    "A wallpaper app built with Jetpack Compose + Kotlin."
-                                ),
-                                fontSize = 14.sp,
-                                color = MaterialTheme.colorScheme.onSurface,
-                                textAlign = TextAlign.Start
-                            )
-
-                            Spacer(modifier = Modifier.height(6.dp))
-
-                            Text(
-                                text = viewModel.getTranslation(
-                                    "本项目基于MIT协议开源",
-                                    "This project is open source under the MIT License."
-                                ),
-                                fontSize = 14.sp,
-                                color = MaterialTheme.colorScheme.onSurface,
-                                textAlign = TextAlign.Start
-                            )
-
-                            Spacer(modifier = Modifier.height(12.dp))
-                            HorizontalDivider(color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.08f))
-                            Spacer(modifier = Modifier.height(12.dp))
-
-                            Text(
-                                text = viewModel.getTranslation("设备信息", "Device info"),
-                                fontSize = 14.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = MaterialTheme.colorScheme.onSurface,
-                                textAlign = TextAlign.Start
-                            )
-                            Spacer(modifier = Modifier.height(8.dp))
-                            Text(
-                                text = deviceRom,
-                                fontSize = 13.sp,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                textAlign = TextAlign.Start
-                            )
-                            Spacer(modifier = Modifier.height(4.dp))
-                            Text(
-                                text = androidVersion,
-                                fontSize = 13.sp,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                textAlign = TextAlign.Start
-                            )
-                        }
-                    }
-
-                    Spacer(modifier = Modifier.height(14.dp))
-
-                    // Project Links Card
-                    Card(
-                        modifier = Modifier.fillMaxWidth(),
-                        shape = RoundedCornerShape(24.dp),
-                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
-                    ) {
-                        Column(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(16.dp),
-                            horizontalAlignment = Alignment.Start,
-                            verticalArrangement = Arrangement.Top
-                        ) {
-                            Text(
-                                text = viewModel.getTranslation("项目链接", "Project links"),
-                                fontSize = 16.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = MaterialTheme.colorScheme.onSurface,
-                                textAlign = TextAlign.Start
-                            )
-                            Spacer(modifier = Modifier.height(12.dp))
-                            AboutLinkItem(
-                                title = "GitHub",
-                                subtitle = "https://github.com/ColdP/TodayWallpaper",
-                                onClick = { openUrl(context, "https://github.com/ColdP/TodayWallpaper") }
-                            )
-                            AboutLinkItem(
-                                title = viewModel.getTranslation("应用官网", "Official Website"),
-                                subtitle = "https://tdwp.btm-m.site",
-                                onClick = { openUrl(context, "https://tdwp.btm-m.site") }
-                            )
-                            AboutLinkItem(
-                                title = "btm_m's Official Site",
-                                subtitle = "https://btm-m.site",
-                                onClick = { openUrl(context, "https://btm-m.site") }
-                            )
-                            AboutLinkItem(
-                                title = "btm_m's Blog",
-                                subtitle = "https://btm-m.live",
-                                onClick = { openUrl(context, "https://btm-m.live") }
-                            )
-                        }
-                    }
-
-                    Spacer(modifier = Modifier.height(14.dp))
-
-                    // Open Source Licenses Card
-                    Card(
+                        .graphicsLayer(
+                            scaleX = scale,
+                            scaleY = scale,
+                            translationX = with(androidx.compose.ui.platform.LocalDensity.current) { translationXDp.toPx() },
+                            alpha = alpha,
+                            clip = cornerRadius > 0.dp,
+                            shape = RoundedCornerShape(cornerRadius)
+                        ),
+                    containerColor = MaterialTheme.colorScheme.background
+                ) { innerPadding ->
+                    Column(
                         modifier = Modifier
-                            .fillMaxWidth()
-                            .clickable { showLicensesPage = true },
-                        shape = RoundedCornerShape(24.dp),
-                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+                            .fillMaxSize()
+                            .padding(innerPadding)
                     ) {
+                        // Title Row
                         Row(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .padding(16.dp),
-                            horizontalArrangement = Arrangement.Start,
+                                .padding(horizontal = 16.dp, vertical = 10.dp),
                             verticalAlignment = Alignment.CenterVertically
                         ) {
+                            IconButton(
+                                onClick = onBack,
+                                modifier = Modifier.size(32.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+                                    contentDescription = viewModel.getTranslation("返回", "Back"),
+                                    tint = MaterialTheme.colorScheme.onBackground,
+                                    modifier = Modifier.size(24.dp)
+                                )
+                            }
+                            Spacer(modifier = Modifier.width(16.dp))
+                            Text(
+                                text = viewModel.getTranslation("关于", "About"),
+                                fontSize = 22.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = MaterialTheme.colorScheme.onBackground
+                            )
+                        }
+
+                        // Scrollable Content
+                        Column(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .verticalScroll(rememberScrollState())
+                                .padding(horizontal = 16.dp)
+                        ) {
+                            Spacer(modifier = Modifier.height(12.dp))
+
+                            // App Info Card
+                            Card(
+                                modifier = Modifier.fillMaxWidth(),
+                                shape = RoundedCornerShape(24.dp),
+                                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+                            ) {
+                                Column(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(16.dp),
+                                    horizontalAlignment = Alignment.Start,
+                                    verticalArrangement = Arrangement.Top
+                                ) {
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.Start
+                                    ) {
+                                        Box(
+                                            modifier = Modifier
+                                                .size(72.dp)
+                                                .clip(RoundedCornerShape(20.dp))
+                                                .background(
+                                                    Brush.linearGradient(
+                                                        colors = listOf(
+                                                            MaterialTheme.colorScheme.primary.copy(alpha = 0.2f),
+                                                            MaterialTheme.colorScheme.primary.copy(alpha = 0.1f)
+                                                        )
+                                                    )
+                                                ),
+                                            contentAlignment = Alignment.Center
+                                        ) {
+                                            Image(
+                                                bitmap = appIconBitmap,
+                                                contentDescription = viewModel.getTranslation("应用图标", "App icon"),
+                                                modifier = Modifier.size(42.dp),
+                                                contentScale = ContentScale.Fit
+                                            )
+                                        }
+                                        Spacer(modifier = Modifier.size(14.dp))
+                                        Column(horizontalAlignment = Alignment.Start) {
+                                            Text(
+                                                text = context.getString(btm.m.todaywallpaper.R.string.app_name),
+                                                fontSize = 20.sp,
+                                                fontWeight = FontWeight.ExtraBold,
+                                                color = MaterialTheme.colorScheme.onSurface,
+                                                textAlign = TextAlign.Start
+                                            )
+                                            Spacer(modifier = Modifier.height(2.dp))
+                                            Text(
+                                                text = appVersion,
+                                                fontSize = 13.sp,
+                                                fontWeight = FontWeight.Medium,
+                                                color = MaterialTheme.colorScheme.secondary,
+                                                textAlign = TextAlign.Start
+                                            )
+                                            Spacer(modifier = Modifier.height(2.dp))
+                                            Text(
+                                                text = "Developed by btm_m",
+                                                fontSize = 12.sp,
+                                                color = MaterialTheme.colorScheme.secondary,
+                                                textAlign = TextAlign.Start
+                                            )
+                                        }
+                                    }
+
+                                    Spacer(modifier = Modifier.height(12.dp))
+
+                                    Text(
+                                        text = viewModel.getTranslation(
+                                            "一个基于Jetpack Compose + Kotlin的壁纸应用。",
+                                            "A wallpaper app built with Jetpack Compose + Kotlin."
+                                        ),
+                                        fontSize = 14.sp,
+                                        color = MaterialTheme.colorScheme.onSurface,
+                                        textAlign = TextAlign.Start
+                                    )
+
+                                    Spacer(modifier = Modifier.height(6.dp))
+
+                                    Text(
+                                        text = viewModel.getTranslation(
+                                            "本项目基于MIT协议开源",
+                                            "This project is open source under the MIT License."
+                                        ),
+                                        fontSize = 14.sp,
+                                        color = MaterialTheme.colorScheme.onSurface,
+                                        textAlign = TextAlign.Start
+                                    )
+
+                                    Spacer(modifier = Modifier.height(12.dp))
+                                    HorizontalDivider(color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.08f))
+                                    Spacer(modifier = Modifier.height(12.dp))
+
+                                    Text(
+                                        text = viewModel.getTranslation("设备信息", "Device info"),
+                                        fontSize = 14.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = MaterialTheme.colorScheme.onSurface,
+                                        textAlign = TextAlign.Start
+                                    )
+                                    Spacer(modifier = Modifier.height(8.dp))
+                                    Text(
+                                        text = deviceRom,
+                                        fontSize = 13.sp,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        textAlign = TextAlign.Start
+                                    )
+                                    Spacer(modifier = Modifier.height(4.dp))
+                                    Text(
+                                        text = Build.MODEL,
+                                        fontSize = 13.sp,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        textAlign = TextAlign.Start
+                                    )
+                                    Spacer(modifier = Modifier.height(4.dp))
+                                    Text(
+                                        text = androidVersion,
+                                        fontSize = 13.sp,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        textAlign = TextAlign.Start
+                                    )
+                                }
+                            }
+
+                            Spacer(modifier = Modifier.height(14.dp))
+
+                            // Project Links Card
+                            Card(
+                                modifier = Modifier.fillMaxWidth(),
+                                shape = RoundedCornerShape(24.dp),
+                                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+                            ) {
+                                Column(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(16.dp),
+                                    horizontalAlignment = Alignment.Start,
+                                    verticalArrangement = Arrangement.Top
+                                ) {
+                                    Text(
+                                        text = viewModel.getTranslation("项目链接", "Project links"),
+                                        fontSize = 16.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = MaterialTheme.colorScheme.onSurface,
+                                        textAlign = TextAlign.Start
+                                    )
+                                    Spacer(modifier = Modifier.height(12.dp))
+                                    AboutLinkItem(
+                                        title = "GitHub",
+                                        subtitle = "https://github.com/ColdP/TodayWallpaper",
+                                        onClick = { openUrl(context, "https://github.com/ColdP/TodayWallpaper") }
+                                    )
+                                    AboutLinkItem(
+                                        title = viewModel.getTranslation("应用官网", "Official Website"),
+                                        subtitle = "https://tdwp.btm-m.site",
+                                        onClick = { openUrl(context, "https://tdwp.btm-m.site") }
+                                    )
+                                    AboutLinkItem(
+                                        title = "btm_m's Official Site",
+                                        subtitle = "https://btm-m.site",
+                                        onClick = { openUrl(context, "https://btm-m.site") }
+                                    )
+                                    AboutLinkItem(
+                                        title = "btm_m's Blog",
+                                        subtitle = "https://btm-m.live",
+                                        onClick = { openUrl(context, "https://btm-m.live") }
+                                    )
+                                }
+                            }
+
+                            Spacer(modifier = Modifier.height(14.dp))
+
+                            // Check for Updates Card
+                            Card(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clickable {
+                                        val intent = Intent(context, UpdateActivity::class.java)
+                                        context.startActivity(intent)
+                                    },
+                                shape = RoundedCornerShape(24.dp),
+                                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+                            ) {
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(16.dp),
+                                    horizontalArrangement = Arrangement.Start,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.Update,
+                                        contentDescription = "Check Update",
+                                        tint = MaterialTheme.colorScheme.primary,
+                                        modifier = Modifier.size(18.dp)
+                                    )
+                                    Spacer(modifier = Modifier.width(12.dp))
+                                    Column(horizontalAlignment = Alignment.Start) {
+                                        Text(
+                                            text = viewModel.getTranslation("软件更新", "Software Update"),
+                                            fontSize = 14.sp,
+                                            fontWeight = FontWeight.Medium,
+                                            color = MaterialTheme.colorScheme.onSurface,
+                                            textAlign = TextAlign.Start
+                                        )
+                                        Text(
+                                            text = viewModel.getTranslation("查看应用更新与版本日志", "View app updates & version changelog"),
+                                            fontSize = 12.sp,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                            textAlign = TextAlign.Start
+                                        )
+                                    }
+                                }
+                            }
+
+                            Spacer(modifier = Modifier.height(14.dp))
+
+                            // Open Source Licenses Card
+                            Card(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clickable { showLicensesPage = true },
+                                shape = RoundedCornerShape(24.dp),
+                                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+                            ) {
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(16.dp),
+                                    horizontalArrangement = Arrangement.Start,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
                             Icon(
-                                imageVector = Icons.AutoMirrored.Filled.OpenInNew,
+                                imageVector = Icons.Default.Code,
                                 contentDescription = viewModel.getTranslation("开源代码声明", "Open Source Licenses"),
                                 tint = MaterialTheme.colorScheme.primary,
                                 modifier = Modifier.size(18.dp)
@@ -390,20 +456,22 @@ fun AboutScreen(
                                     textAlign = TextAlign.Start
                                 )
                             }
+                                }
+                            }
+
+                            Spacer(modifier = Modifier.height(24.dp))
+
+                            Text(
+                                text = "© $year btm_m",
+                                fontSize = 12.sp,
+                                color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.35f),
+                                textAlign = TextAlign.Start,
+                                modifier = Modifier.padding(bottom = 10.dp)
+                            )
+
+                            Spacer(modifier = Modifier.height(48.dp))
                         }
                     }
-
-                    Spacer(modifier = Modifier.height(24.dp))
-
-                    Text(
-                        text = "© $year btm_m",
-                        fontSize = 12.sp,
-                        color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.35f),
-                        textAlign = TextAlign.Start,
-                        modifier = Modifier.padding(bottom = 10.dp)
-                    )
-
-                    Spacer(modifier = Modifier.height(48.dp))
                 }
             }
         }

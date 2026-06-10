@@ -26,6 +26,8 @@ import kotlinx.coroutines.launch
 import org.json.JSONArray
 import org.json.JSONObject
 import btm.m.todaywallpaper.ui.screens.CategoryItem
+import btm.m.todaywallpaper.ui.screens.LiquidGlassPreset
+import btm.m.todaywallpaper.ui.screens.LiquidGlassPresetManager
 
 // Shared screen definition
 sealed interface Screen {
@@ -162,8 +164,117 @@ class WallpaperViewModel(application: Application) : AndroidViewModel(applicatio
     private val _avatarUrl = MutableStateFlow<String?>(null)
     val avatarUrl: StateFlow<String?> = _avatarUrl.asStateFlow()
 
+    private val _profileSubtitle = MutableStateFlow("")
+    val profileSubtitle: StateFlow<String> = _profileSubtitle.asStateFlow()
+
     private val _pexelsApiKey = MutableStateFlow("")
     val pexelsApiKey: StateFlow<String> = _pexelsApiKey.asStateFlow()
+
+    // Liquid Glass blur radius in dp (0f ~ 80f), default 8f
+    private val _liquidGlassBlur = MutableStateFlow(8f)
+    val liquidGlassBlur: StateFlow<Float> = _liquidGlassBlur.asStateFlow()
+
+    fun setLiquidGlassBlur(value: Float) {
+        val clamped = value.coerceIn(0f, 25f)
+        _liquidGlassBlur.value = clamped
+        persistAndPropagate("liquid_glass_blur", clamped)
+    }
+
+    // Advanced Liquid Glass toggle
+    private val _liquidGlassAdvanced = MutableStateFlow(false)
+    val liquidGlassAdvanced: StateFlow<Boolean> = _liquidGlassAdvanced.asStateFlow()
+
+    fun setLiquidGlassAdvanced(enabled: Boolean) {
+        _liquidGlassAdvanced.value = enabled
+        val sp = getApplication<Application>().getSharedPreferences("app_gallery_prefs", Application.MODE_PRIVATE)
+        sp.edit().putBoolean("liquid_glass_advanced", enabled).apply()
+        mainViewModelInstance?.let { main -> if (main !== this) main._liquidGlassAdvanced.value = enabled }
+    }
+
+    // setRefractionHeight: 12dp ~ 50dp, default 20dp
+    private val _lgRefractionHeight = MutableStateFlow(20f)
+    val lgRefractionHeight: StateFlow<Float> = _lgRefractionHeight.asStateFlow()
+
+    fun setLgRefractionHeight(value: Float) {
+        _lgRefractionHeight.value = value.coerceIn(12f, 50f)
+        persistAndPropagate("lg_refraction_height", _lgRefractionHeight.value)
+    }
+
+    // setRefractionOffset: 20dp ~ 120dp, default 70dp
+    private val _lgRefractionOffset = MutableStateFlow(70f)
+    val lgRefractionOffset: StateFlow<Float> = _lgRefractionOffset.asStateFlow()
+
+    fun setLgRefractionOffset(value: Float) {
+        _lgRefractionOffset.value = value.coerceIn(20f, 120f)
+        persistAndPropagate("lg_refraction_offset", _lgRefractionOffset.value)
+    }
+
+    // setTintAlpha: 0f ~ 1f, default 0f
+    private val _lgTintAlpha = MutableStateFlow(0f)
+    val lgTintAlpha: StateFlow<Float> = _lgTintAlpha.asStateFlow()
+
+    fun setLgTintAlpha(value: Float) {
+        _lgTintAlpha.value = value.coerceIn(0f, 1f)
+        persistAndPropagate("lg_tint_alpha", _lgTintAlpha.value)
+    }
+
+    // setDispersion: 0f ~ 1f, default 0f
+    private val _lgDispersion = MutableStateFlow(0f)
+    val lgDispersion: StateFlow<Float> = _lgDispersion.asStateFlow()
+
+    fun setLgDispersion(value: Float) {
+        _lgDispersion.value = value.coerceIn(0f, 1f)
+        persistAndPropagate("lg_dispersion", _lgDispersion.value)
+    }
+
+    // Draggable, Elastic, Touch
+    private val _lgDraggable = MutableStateFlow(false)
+    val lgDraggable: StateFlow<Boolean> = _lgDraggable.asStateFlow()
+
+    fun setLgDraggable(enabled: Boolean) {
+        _lgDraggable.value = enabled
+        persistBool("lg_draggable", enabled)
+        mainViewModelInstance?.let { main -> if (main !== this) main._lgDraggable.value = enabled }
+    }
+
+    private val _lgElastic = MutableStateFlow(false)
+    val lgElastic: StateFlow<Boolean> = _lgElastic.asStateFlow()
+
+    fun setLgElastic(enabled: Boolean) {
+        _lgElastic.value = enabled
+        persistBool("lg_elastic", enabled)
+        mainViewModelInstance?.let { main -> if (main !== this) main._lgElastic.value = enabled }
+    }
+
+    private val _lgTouchEffect = MutableStateFlow(false)
+    val lgTouchEffect: StateFlow<Boolean> = _lgTouchEffect.asStateFlow()
+
+    fun setLgTouchEffect(enabled: Boolean) {
+        _lgTouchEffect.value = enabled
+        persistBool("lg_touch_effect", enabled)
+        mainViewModelInstance?.let { main -> if (main !== this) main._lgTouchEffect.value = enabled }
+    }
+
+    private fun persistAndPropagate(key: String, value: Float) {
+        val sp = getApplication<Application>().getSharedPreferences("app_gallery_prefs", Application.MODE_PRIVATE)
+        sp.edit().putFloat(key, value).apply()
+        mainViewModelInstance?.let { main ->
+            if (main !== this) {
+                when (key) {
+                    "liquid_glass_blur" -> main._liquidGlassBlur.value = value
+                    "lg_refraction_height" -> main._lgRefractionHeight.value = value
+                    "lg_refraction_offset" -> main._lgRefractionOffset.value = value
+                    "lg_tint_alpha" -> main._lgTintAlpha.value = value
+                    "lg_dispersion" -> main._lgDispersion.value = value
+                }
+            }
+        }
+    }
+
+    private fun persistBool(key: String, value: Boolean) {
+        val sp = getApplication<Application>().getSharedPreferences("app_gallery_prefs", Application.MODE_PRIVATE)
+        sp.edit().putBoolean(key, value).apply()
+    }
 
     private val _showApiKeyPrompt = MutableStateFlow(false)
     val showApiKeyPrompt: StateFlow<Boolean> = _showApiKeyPrompt.asStateFlow()
@@ -364,8 +475,18 @@ class WallpaperViewModel(application: Application) : AndroidViewModel(applicatio
         _homeWallpaperType.value = sp.getString("home_wallpaper_type", "PexelsCurated") ?: "PexelsCurated"
         _username.value = sp.getString("username", "探索家用户") ?: "探索家用户"
         _avatarUrl.value = sp.getString("avatar_url", null)
+        _profileSubtitle.value = sp.getString("profile_subtitle", "") ?: ""
         _pexelsApiKey.value = sp.getString("pexels_api_key", "") ?: ""
         _homeGestureEnabled.value = sp.getBoolean("home_gesture_enabled", false)
+        _liquidGlassBlur.value = sp.getFloat("liquid_glass_blur", 8f)
+        _liquidGlassAdvanced.value = sp.getBoolean("liquid_glass_advanced", false)
+        _lgRefractionHeight.value = sp.getFloat("lg_refraction_height", 20f)
+        _lgRefractionOffset.value = sp.getFloat("lg_refraction_offset", 70f)
+        _lgTintAlpha.value = sp.getFloat("lg_tint_alpha", 0f)
+        _lgDispersion.value = sp.getFloat("lg_dispersion", 0f)
+        _lgDraggable.value = sp.getBoolean("lg_draggable", false)
+        _lgElastic.value = sp.getBoolean("lg_elastic", false)
+        _lgTouchEffect.value = sp.getBoolean("lg_touch_effect", false)
     }
 
     fun updateUsername(newName: String) {
@@ -378,6 +499,12 @@ class WallpaperViewModel(application: Application) : AndroidViewModel(applicatio
         _avatarUrl.value = newUrl
         val sp = getApplication<Application>().getSharedPreferences("app_gallery_prefs", Application.MODE_PRIVATE)
         sp.edit().putString("avatar_url", newUrl).apply()
+    }
+
+    fun updateProfileSubtitle(newSubtitle: String) {
+        _profileSubtitle.value = newSubtitle
+        val sp = getApplication<Application>().getSharedPreferences("app_gallery_prefs", Application.MODE_PRIVATE)
+        sp.edit().putString("profile_subtitle", newSubtitle).apply()
     }
 
     fun loadCategoryCovers(categoryKeys: List<String>) {
@@ -1137,6 +1264,12 @@ class WallpaperViewModel(application: Application) : AndroidViewModel(applicatio
         }
     }
 
+    fun updateCollectionCover(collectionId: Int, coverUrl: String) {
+        viewModelScope.launch {
+            repository.updateCollectionCover(collectionId, coverUrl)
+        }
+    }
+
 
     // ==========================================
     // 6. REAL ANDROID SDK WALLPAPER MANAGER
@@ -1479,7 +1612,114 @@ class WallpaperViewModel(application: Application) : AndroidViewModel(applicatio
     }
 
     // ==========================================
-    // 8. WIDGET DATA PERSISTENCE
+    // 8. LIQUID GLASS PRESETS
+    // ==========================================
+
+    private val _presets = MutableStateFlow<List<LiquidGlassPreset>>(emptyList())
+    val presets: StateFlow<List<LiquidGlassPreset>> = _presets.asStateFlow()
+
+    private val _activePresetName = MutableStateFlow<String?>(null)
+    val activePresetName: StateFlow<String?> = _activePresetName.asStateFlow()
+
+    fun loadPresets(context: android.content.Context) {
+        _presets.value = LiquidGlassPresetManager.getAllPresets(context)
+        _activePresetName.value = LiquidGlassPresetManager.getActivePresetName(context)
+    }
+
+    fun saveCurrentAsPreset(context: android.content.Context, name: String) {
+        // Reject built-in preset names
+        if (LiquidGlassPresetManager.BUILT_IN_PRESETS.any { it.name == name }) return
+        val preset = LiquidGlassPreset(
+            name = name,
+            blur = _liquidGlassBlur.value,
+            refractionHeight = _lgRefractionHeight.value,
+            refractionOffset = _lgRefractionOffset.value,
+            tintAlpha = _lgTintAlpha.value,
+            dispersion = _lgDispersion.value,
+            draggable = _lgDraggable.value,
+            elastic = _lgElastic.value,
+            touchEffect = _lgTouchEffect.value
+        )
+        LiquidGlassPresetManager.savePreset(context, preset)
+        LiquidGlassPresetManager.setActivePresetName(context, name)
+        _presets.value = LiquidGlassPresetManager.getAllPresets(context)
+        _activePresetName.value = name
+    }
+
+    fun applyPreset(context: android.content.Context, preset: LiquidGlassPreset) {
+        _liquidGlassBlur.value = preset.blur
+        _lgRefractionHeight.value = preset.refractionHeight
+        _lgRefractionOffset.value = preset.refractionOffset
+        _lgTintAlpha.value = preset.tintAlpha
+        _lgDispersion.value = preset.dispersion
+        _lgDraggable.value = preset.draggable
+        _lgElastic.value = preset.elastic
+        _lgTouchEffect.value = preset.touchEffect
+
+        // Persist all values
+        val sp = getApplication<Application>().getSharedPreferences("app_gallery_prefs", Application.MODE_PRIVATE)
+        sp.edit()
+            .putFloat("liquid_glass_blur", preset.blur)
+            .putFloat("lg_refraction_height", preset.refractionHeight)
+            .putFloat("lg_refraction_offset", preset.refractionOffset)
+            .putFloat("lg_tint_alpha", preset.tintAlpha)
+            .putFloat("lg_dispersion", preset.dispersion)
+            .putBoolean("lg_draggable", preset.draggable)
+            .putBoolean("lg_elastic", preset.elastic)
+            .putBoolean("lg_touch_effect", preset.touchEffect)
+            .apply()
+
+        // Propagate to main instance
+        mainViewModelInstance?.let { main ->
+            if (main !== this) {
+                main._liquidGlassBlur.value = preset.blur
+                main._lgRefractionHeight.value = preset.refractionHeight
+                main._lgRefractionOffset.value = preset.refractionOffset
+                main._lgTintAlpha.value = preset.tintAlpha
+                main._lgDispersion.value = preset.dispersion
+                main._lgDraggable.value = preset.draggable
+                main._lgElastic.value = preset.elastic
+                main._lgTouchEffect.value = preset.touchEffect
+            }
+        }
+
+        LiquidGlassPresetManager.setActivePresetName(context, preset.name)
+        _activePresetName.value = preset.name
+    }
+
+    fun deletePreset(context: android.content.Context, name: String) {
+        LiquidGlassPresetManager.deletePreset(context, name)
+        _presets.value = LiquidGlassPresetManager.getAllPresets(context)
+        if (_activePresetName.value == name) {
+            _activePresetName.value = null
+        }
+    }
+
+    fun importPresetsFromJson(context: android.content.Context, jsonStr: String): Pair<Int, String> {
+        val parsed = LiquidGlassPreset.parseJsonPresets(jsonStr)
+        if (parsed.isEmpty()) return 0 to getTranslation("无效的JSON格式", "Invalid JSON format")
+        var count = 0
+        parsed.forEach { preset ->
+            LiquidGlassPresetManager.savePreset(context, preset)
+            count++
+        }
+        _presets.value = LiquidGlassPresetManager.getAllPresets(context)
+        return count to ""
+    }
+
+    fun exportPresetsToJson(context: android.content.Context, names: List<String>? = null): String {
+        val allPresets = if (names != null) {
+            LiquidGlassPresetManager.getAllPresets(context).filter { it.name in names }
+        } else {
+            LiquidGlassPresetManager.getAllPresets(context)
+        }
+        val arr = org.json.JSONArray()
+        allPresets.forEach { arr.put(it.toJson()) }
+        return arr.toString(2)
+    }
+
+    // ==========================================
+    // 9. WIDGET DATA PERSISTENCE
     // ==========================================
 
     init {

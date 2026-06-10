@@ -76,6 +76,9 @@ class SafeLiquidGlassView @JvmOverloads constructor(
         } catch (t: Throwable) {
             Log.e("SafeLiquidGlassView", "Caught exception during onAttachedToWindow: ${t.message}")
         }
+        // Re-inject dummy glass if glass is still null after super call
+        // This prevents NPE when updateConfig is posted to handler
+        injectDummyGlassIfNull()
     }
 
     override fun onDetachedFromWindow() {

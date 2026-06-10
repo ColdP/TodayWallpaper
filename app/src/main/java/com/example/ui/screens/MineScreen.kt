@@ -32,7 +32,6 @@ import androidx.compose.material.icons.filled.*
 import androidx.compose.material.icons.outlined.Collections
 import androidx.compose.material.icons.outlined.Favorite
 import androidx.compose.material.icons.outlined.Language
-import androidx.compose.material.icons.outlined.LibraryAdd
 import androidx.compose.material.icons.outlined.Palette
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -119,6 +118,7 @@ fun MineScreen(
 
     val currentUsername by viewModel.username.collectAsState()
     val currentAvatarUrl by viewModel.avatarUrl.collectAsState()
+    val currentProfileSubtitle by viewModel.profileSubtitle.collectAsState()
     
     var tempAvatarUrlForDialog by remember { mutableStateOf("") }
 
@@ -246,7 +246,9 @@ fun MineScreen(
                             }
                             Spacer(modifier = Modifier.height(2.dp))
                             Text(
-                                text = viewModel.getTranslation("每一次收藏，皆是对美学的赞美", "Each bookmark praises outstanding aesthetics"),
+                                text = currentProfileSubtitle.ifEmpty {
+                                    viewModel.getTranslation("每一次收藏，皆是对美学的赞美", "Each bookmark praises outstanding aesthetics")
+                                },
                                 fontSize = 12.sp,
                                 color = MaterialTheme.colorScheme.secondary
                             )
@@ -263,7 +265,8 @@ fun MineScreen(
                     ) {
                         SectionTitle(
                             icon = Icons.Outlined.Collections,
-                            text = viewModel.getTranslation("本地自定义图集", "Custom Albums")
+                            text = viewModel.getTranslation("本地自定义图集", "Custom Albums"),
+                            modifier = Modifier.weight(1f)
                         )
 
                         IconButton(
@@ -271,7 +274,7 @@ fun MineScreen(
                             modifier = Modifier.testTag("mine_add_collection_btn")
                         ) {
                             Icon(
-                                imageVector = Icons.Outlined.LibraryAdd,
+                                imageVector = Icons.Default.Add,
                                 contentDescription = "Create Album",
                                 tint = MaterialTheme.colorScheme.primary
                             )
@@ -323,7 +326,8 @@ fun MineScreen(
                     // SECTION 2: BOOKMARKED FAVORITES (HORIZONTAL PREVIEWS)
                     SectionTitle(
                         icon = Icons.Outlined.Favorite,
-                        text = viewModel.getTranslation("我喜欢的壁纸", "My Favorites")
+                        text = viewModel.getTranslation("我喜欢的壁纸", "My Favorites"),
+                        modifier = Modifier.fillMaxWidth()
                     )
 
                     Spacer(modifier = Modifier.height(10.dp))
@@ -374,7 +378,8 @@ fun MineScreen(
                     // SECTION 3: SYSTEM PREFERENCES & CONTROLS
                     SectionTitle(
                         icon = Icons.Filled.Settings,
-                        text = viewModel.getTranslation("偏好与系统设置", "System Preferences")
+                        text = viewModel.getTranslation("偏好与系统设置", "System Preferences"),
+                        modifier = Modifier.fillMaxWidth()
                     )
 
                     Spacer(modifier = Modifier.height(10.dp))
@@ -482,6 +487,54 @@ fun MineScreen(
                                         textAlign = TextAlign.End,
                                         modifier = Modifier.widthIn(max = 140.dp),
                                         maxLines = 1
+                                    )
+                                    Spacer(modifier = Modifier.width(4.dp))
+                                    Icon(
+                                        imageVector = Icons.AutoMirrored.Filled.KeyboardArrowRight,
+                                        contentDescription = "Arrow",
+                                        tint = MaterialTheme.colorScheme.secondary,
+                                        modifier = Modifier.size(16.dp)
+                                    )
+                                }
+                            }
+
+                            HorizontalDivider(color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.06f))
+
+                            // Liquid Glass Adjustment row
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clickable {
+                                        val intent = android.content.Intent(context, btm.m.todaywallpaper.ui.screens.LiquidGlassSettingActivity::class.java)
+                                        context.startActivity(intent)
+                                    }
+                                    .padding(16.dp),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Icon(
+                                        imageVector = Icons.Filled.BlurOn,
+                                        contentDescription = "Liquid Glass",
+                                        tint = MaterialTheme.colorScheme.primary,
+                                        modifier = Modifier.size(20.dp)
+                                    )
+                                    Spacer(modifier = Modifier.width(12.dp))
+                                    Text(
+                                        text = viewModel.getTranslation("Liquid Glass 调整", "Liquid Glass Adjustment"),
+                                        fontSize = 14.sp,
+                                        fontWeight = FontWeight.Medium,
+                                        color = MaterialTheme.colorScheme.onSurface
+                                    )
+                                }
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    val liquidGlassBlurSp = context.getSharedPreferences("app_gallery_prefs", android.content.Context.MODE_PRIVATE)
+                                    val currentBlur = liquidGlassBlurSp.getFloat("liquid_glass_blur", 8f)
+                                    Text(
+                                        text = "${currentBlur.toInt()}dp",
+                                        fontSize = 12.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = MaterialTheme.colorScheme.primary
                                     )
                                     Spacer(modifier = Modifier.width(4.dp))
                                     Icon(
@@ -809,10 +862,51 @@ fun MineScreen(
                     CreateCollectionDialog(
                         viewModel = viewModel,
                         onDismiss = { showCreateCollectionDialog = false },
-                        onConfirm = { name, desc ->
-                            viewModel.createNewCollection(name, desc) {
-                                showCreateCollectionDialog = false
-                                Toast.makeText(context, viewModel.getTranslation("图集创建成功！", "Album created successfully!"), Toast.LENGTH_SHORT).show()
+                        onConfirm = { name, desc, selectedUris ->
+                            viewModel.createNewCollection(name, desc) { collectionId ->
+                                if (selectedUris.isNotEmpty()) {
+                                    // Batch upload selected images
+                                    kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.IO).launch {
+                                        selectedUris.forEachIndexed { index, uri ->
+                                            try {
+                                                val stream = context.contentResolver.openInputStream(uri)
+                                                if (stream != null) {
+                                                    val folder = java.io.File(context.filesDir, "local_collections")
+                                                    if (!folder.exists()) folder.mkdirs()
+                                                    val photoId = "local_${System.currentTimeMillis()}_$index"
+                                                    val file = java.io.File(folder, "img_${photoId}.jpg")
+                                                    kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                                                        java.io.FileOutputStream(file).use { out ->
+                                                            stream.use { input -> input.copyTo(out) }
+                                                        }
+                                                    }
+                                                    val localPath = "file://${file.absolutePath}"
+                                                    val wallpaper = btm.m.todaywallpaper.ui.viewmodel.UnifiedWallpaper(
+                                                        id = photoId,
+                                                        imageUrl = localPath,
+                                                        thumbnailUrl = localPath,
+                                                        author = null,
+                                                        authorUrl = "",
+                                                        source = "Local Gallery",
+                                                        category = null
+                                                    )
+                                                    withContext(kotlinx.coroutines.Dispatchers.Main) {
+                                                        viewModel.addWallpaperToCollectionId(collectionId, wallpaper)
+                                                    }
+                                                }
+                                            } catch (e: Exception) {
+                                                // Skip failed images silently
+                                            }
+                                        }
+                                        withContext(kotlinx.coroutines.Dispatchers.Main) {
+                                            showCreateCollectionDialog = false
+                                            Toast.makeText(context, viewModel.getTranslation("图集创建成功！已添加 ${selectedUris.size} 张图片", "Album created! Added ${selectedUris.size} images"), Toast.LENGTH_SHORT).show()
+                                        }
+                                    }
+                                } else {
+                                    showCreateCollectionDialog = false
+                                    Toast.makeText(context, viewModel.getTranslation("图集创建成功！", "Album created successfully!"), Toast.LENGTH_SHORT).show()
+                                }
                             }
                         }
                     )
@@ -820,6 +914,7 @@ fun MineScreen(
 
                 if (showEditProfileDialog) {
                     var inputUsername by remember { mutableStateOf(currentUsername) }
+                    var inputSubtitle by remember { mutableStateOf(currentProfileSubtitle) }
 
                     AlertDialog(
                         onDismissRequest = { showEditProfileDialog = false },
@@ -901,6 +996,15 @@ fun MineScreen(
                                     modifier = Modifier.fillMaxWidth(),
                                     shape = RoundedCornerShape(12.dp)
                                 )
+                                OutlinedTextField(
+                                    value = inputSubtitle,
+                                    onValueChange = { inputSubtitle = it },
+                                    label = { Text(text = viewModel.getTranslation("个性签名", "Custom Subtitle")) },
+                                    placeholder = { Text(text = viewModel.getTranslation("每一次收藏，皆是对美学的赞美", "Each bookmark praises outstanding aesthetics")) },
+                                    singleLine = true,
+                                    modifier = Modifier.fillMaxWidth(),
+                                    shape = RoundedCornerShape(12.dp)
+                                )
                             }
                         },
                         confirmButton = {
@@ -910,6 +1014,7 @@ fun MineScreen(
                                         viewModel.updateUsername(inputUsername.trim())
                                     }
                                     viewModel.updateAvatar(tempAvatarUrlForDialog.trim().ifEmpty { null })
+                                    viewModel.updateProfileSubtitle(inputSubtitle.trim())
                                     showEditProfileDialog = false
                                 }
                             ) {
@@ -1078,6 +1183,40 @@ fun CollectionDetailsView(
     var editItemTitle by remember { mutableStateOf("") }
     var editItemSource by remember { mutableStateOf("") }
 
+    // Long-press action dialog state (delete / set as cover)
+    var longPressActionItem by remember { mutableStateOf<CollectionItem?>(null) }
+
+    // Cover picker: set a custom cover from local storage
+    val coverPickerLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.GetContent()
+    ) { uri: Uri? ->
+        if (uri != null) {
+            coroutineScope.launch {
+                try {
+                    val stream = context.contentResolver.openInputStream(uri)
+                    if (stream != null) {
+                        val folder = java.io.File(context.filesDir, "local_collections")
+                        if (!folder.exists()) folder.mkdirs()
+                        val coverId = "cover_${System.currentTimeMillis()}"
+                        val file = java.io.File(folder, "img_${coverId}.jpg")
+                        withContext(Dispatchers.IO) {
+                            java.io.FileOutputStream(file).use { out ->
+                                stream.use { input -> input.copyTo(out) }
+                            }
+                        }
+                        val localPath = "file://${file.absolutePath}"
+                        viewModel.updateCollectionCover(collection.id, localPath)
+                        withContext(Dispatchers.Main) {
+                            Toast.makeText(context, viewModel.getTranslation("封面已更新！", "Cover updated!"), Toast.LENGTH_SHORT).show()
+                        }
+                    }
+                } catch (e: Exception) {
+                    Toast.makeText(context, viewModel.getTranslation("封面设置失败", "Failed to set cover"), Toast.LENGTH_SHORT).show()
+                }
+            }
+        }
+    }
+
     val galleryLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.GetContent()
     ) { uri: Uri? ->
@@ -1165,6 +1304,18 @@ fun CollectionDetailsView(
                     text = "${items.size} ${viewModel.getTranslation("张壁纸", "wallpapers")}",
                     fontSize = 12.sp,
                     color = MaterialTheme.colorScheme.secondary
+                )
+            }
+
+            // Set custom cover button
+            IconButton(
+                onClick = { coverPickerLauncher.launch("image/*") },
+                modifier = Modifier.testTag("set_cover_btn")
+            ) {
+                Icon(
+                    imageVector = Icons.Filled.PhotoCamera,
+                    contentDescription = "Set Cover",
+                    tint = MaterialTheme.colorScheme.primary
                 )
             }
 
@@ -1263,7 +1414,7 @@ fun CollectionDetailsView(
                                 contentScale = ContentScale.Crop
                             )
 
-                            // Click to view detail, long press to edit metadata
+                            // Click to view detail, long press to show action dialog
                             Box(
                                 modifier = Modifier
                                     .fillMaxSize()
@@ -1277,35 +1428,10 @@ fun CollectionDetailsView(
                                             )
                                         },
                                         onLongClick = {
-                                            editItemTitle = item.authorName ?: ""
-                                            editItemSource = item.source
-                                            editItemDialogData = item
+                                            longPressActionItem = item
                                         }
                                     )
                             )
-
-                            // Action to delete only this photo from the collection
-                            IconButton(
-                                onClick = {
-                                    viewModel.removeWallpaperFromCollection(collection.id, item.wallpaperId)
-                                    viewModel.fetchActiveCollectionItems(collection.id)
-                                    Toast.makeText(context, viewModel.getTranslation("图片已移出图集！", "Image removed from album!"), Toast.LENGTH_SHORT).show()
-                                },
-                                colors = IconButtonDefaults.iconButtonColors(
-                                    containerColor = Color.Black.copy(alpha = 0.5f),
-                                    contentColor = Color.White
-                                ),
-                                modifier = Modifier
-                                    .align(Alignment.TopEnd)
-                                    .padding(6.dp)
-                                    .size(32.dp)
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Filled.Close,
-                                    contentDescription = "Delete photo",
-                                    modifier = Modifier.size(16.dp)
-                                )
-                            }
                         }
                     }
                 }
@@ -1313,7 +1439,115 @@ fun CollectionDetailsView(
         }
     }
 
-    // Edit item metadata dialog (for long-press edit or upload-time edit)
+    // Long-press action dialog: delete from album / set as cover
+    longPressActionItem?.let { actionItem ->
+        AlertDialog(
+            onDismissRequest = { longPressActionItem = null },
+            title = {
+                Text(
+                    text = viewModel.getTranslation("图片操作", "Image Actions"),
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 18.sp
+                )
+            },
+            text = {
+                Column(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalArrangement = Arrangement.spacedBy(4.dp)
+                ) {
+                    // Set as album cover option
+                    Surface(
+                        onClick = {
+                            viewModel.updateCollectionCover(collection.id, actionItem.imageUrl)
+                            longPressActionItem = null
+                            Toast.makeText(context, viewModel.getTranslation("已设为图集封面！", "Set as album cover!"), Toast.LENGTH_SHORT).show()
+                        },
+                        shape = RoundedCornerShape(12.dp),
+                        color = Color.Transparent
+                    ) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(vertical = 12.dp, horizontal = 4.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Icon(
+                                imageVector = Icons.Filled.Image,
+                                contentDescription = "Set as Cover",
+                                tint = MaterialTheme.colorScheme.primary,
+                                modifier = Modifier.size(22.dp)
+                            )
+                            Spacer(modifier = Modifier.width(14.dp))
+                            Column {
+                                Text(
+                                    text = viewModel.getTranslation("设置为图集封面", "Set as Album Cover"),
+                                    fontSize = 15.sp,
+                                    fontWeight = FontWeight.Medium,
+                                    color = MaterialTheme.colorScheme.onSurface
+                                )
+                                Text(
+                                    text = viewModel.getTranslation("此图片将作为图集封面显示", "This image will be used as the album cover"),
+                                    fontSize = 11.sp,
+                                    color = MaterialTheme.colorScheme.secondary
+                                )
+                            }
+                        }
+                    }
+
+                    HorizontalDivider(color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.08f))
+
+                    // Delete from album option
+                    Surface(
+                        onClick = {
+                            viewModel.removeWallpaperFromCollection(collection.id, actionItem.wallpaperId)
+                            viewModel.fetchActiveCollectionItems(collection.id)
+                            longPressActionItem = null
+                            Toast.makeText(context, viewModel.getTranslation("图片已移出图集！", "Image removed from album!"), Toast.LENGTH_SHORT).show()
+                        },
+                        shape = RoundedCornerShape(12.dp),
+                        color = Color.Transparent
+                    ) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(vertical = 12.dp, horizontal = 4.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Icon(
+                                imageVector = Icons.Filled.DeleteOutline,
+                                contentDescription = "Delete",
+                                tint = MaterialTheme.colorScheme.error,
+                                modifier = Modifier.size(22.dp)
+                            )
+                            Spacer(modifier = Modifier.width(14.dp))
+                            Column {
+                                Text(
+                                    text = viewModel.getTranslation("从图集中删除", "Remove from Album"),
+                                    fontSize = 15.sp,
+                                    fontWeight = FontWeight.Medium,
+                                    color = MaterialTheme.colorScheme.error
+                                )
+                                Text(
+                                    text = viewModel.getTranslation("此图片将从当前图集移除", "This image will be removed from the album"),
+                                    fontSize = 11.sp,
+                                    color = MaterialTheme.colorScheme.secondary
+                                )
+                            }
+                        }
+                    }
+                }
+            },
+            confirmButton = {},
+            dismissButton = {
+                TextButton(onClick = { longPressActionItem = null }) {
+                    Text(viewModel.getTranslation("取消", "Cancel"))
+                }
+            },
+            shape = RoundedCornerShape(24.dp)
+        )
+    }
+
+    // Edit item metadata dialog (for upload-time edit only)
     editItemDialogData?.let { editItem ->
         AlertDialog(
             onDismissRequest = { editItemDialogData = null },
@@ -1422,10 +1656,19 @@ fun CollectionDetailsView(
 fun CreateCollectionDialog(
     viewModel: WallpaperViewModel,
     onDismiss: () -> Unit,
-    onConfirm: (String, String?) -> Unit
+    onConfirm: (String, String?, List<Uri>) -> Unit
 ) {
     var collectionName by remember { mutableStateOf("") }
     var collectionDesc by remember { mutableStateOf("") }
+    val selectedUris = remember { mutableStateListOf<Uri>() }
+    val context = LocalContext.current
+
+    val multiImagePicker = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.GetMultipleContents()
+    ) { uris: List<Uri> ->
+        selectedUris.clear()
+        selectedUris.addAll(uris)
+    }
 
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -1462,11 +1705,57 @@ fun CreateCollectionDialog(
                     modifier = Modifier.fillMaxWidth(),
                     shape = RoundedCornerShape(12.dp)
                 )
+
+                // Batch image upload section
+                HorizontalDivider(color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.06f))
+
+                Text(
+                    text = viewModel.getTranslation("批量添加图片（可选）", "Batch add images (optional)"),
+                    fontSize = 13.sp,
+                    fontWeight = FontWeight.Medium,
+                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f)
+                )
+
+                OutlinedButton(
+                    onClick = { multiImagePicker.launch("image/*") },
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(12.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Filled.PhotoLibrary,
+                        contentDescription = null,
+                        modifier = Modifier.size(18.dp)
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(
+                        text = if (selectedUris.isEmpty()) {
+                            viewModel.getTranslation("选择本地图片", "Select local images")
+                        } else {
+                            viewModel.getTranslation("已选择 ${selectedUris.size} 张图片", "${selectedUris.size} images selected")
+                        }
+                    )
+                }
+
+                // Show selected image count if any
+                if (selectedUris.isNotEmpty()) {
+                    Text(
+                        text = viewModel.getTranslation(
+                            "已选择 ${selectedUris.size} 张图片，创建后将自动添加到图集中",
+                            "${selectedUris.size} images will be added to the album after creation"
+                        ),
+                        fontSize = 11.sp,
+                        color = MaterialTheme.colorScheme.primary.copy(alpha = 0.7f)
+                    )
+                }
             }
         },
         confirmButton = {
             Button(
-                onClick = { if (collectionName.isNotBlank()) onConfirm(collectionName, collectionDesc) },
+                onClick = {
+                    if (collectionName.isNotBlank()) {
+                        onConfirm(collectionName, collectionDesc.ifBlank { null }, selectedUris.toList())
+                    }
+                },
                 enabled = collectionName.isNotBlank(),
                 modifier = Modifier.testTag("dialog_album_confirm_btn")
             ) {
@@ -1477,7 +1766,8 @@ fun CreateCollectionDialog(
             TextButton(onClick = onDismiss) {
                 Text(text = viewModel.getTranslation("取消", "Cancel"))
             }
-        }
+        },
+        shape = RoundedCornerShape(24.dp)
     )
 }
 

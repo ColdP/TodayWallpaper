@@ -140,7 +140,8 @@ fun CategoriesScreen(
                     // Predefined Pexels Themes
                     SectionTitle(
                         icon = Icons.Filled.Explore,
-                        text = viewModel.getTranslation("高清摄影原宿 (Pexels)", "HD Photo Realism (Pexels)")
+                        text = viewModel.getTranslation("高清摄影原宿 (Pexels)", "HD Photo Realism (Pexels)"),
+                        modifier = Modifier.fillMaxWidth()
                     )
                     Spacer(modifier = Modifier.height(12.dp))
 
@@ -161,7 +162,8 @@ fun CategoriesScreen(
                     ) {
                         SectionTitle(
                             icon = Icons.Filled.Category,
-                            text = viewModel.getTranslation("自主定制板块 (Pexels 检索)", "Custom Themes (Pexels Query)")
+                            text = viewModel.getTranslation("自主定制板块 (Pexels 检索)", "Custom Themes (Pexels Query)"),
+                            modifier = Modifier.weight(1f)
                         )
                         TextButton(
                             onClick = { showAddCategoryDialog = true },
@@ -264,7 +266,8 @@ fun CategoriesScreen(
                     // Nekosia Illustration Header
                     SectionTitle(
                         icon = Icons.Filled.Grid3x3,
-                        text = viewModel.getTranslation("动漫插画工坊 (Nekosia API)", "Anime Illustration Guild (Nekosia)")
+                        text = viewModel.getTranslation("动漫插画工坊 (Nekosia API)", "Anime Illustration Guild (Nekosia)"),
+                        modifier = Modifier.fillMaxWidth()
                     )
                     Spacer(modifier = Modifier.height(12.dp))
 
@@ -654,11 +657,12 @@ fun CategoriesScreen(
 @Composable
 fun SectionTitle(
     icon: androidx.compose.ui.graphics.vector.ImageVector,
-    text: String
+    text: String,
+    modifier: Modifier = Modifier
 ) {
     Row(
         verticalAlignment = Alignment.CenterVertically,
-        modifier = Modifier.fillMaxWidth()
+        modifier = modifier
     ) {
         Icon(
             imageVector = icon,
