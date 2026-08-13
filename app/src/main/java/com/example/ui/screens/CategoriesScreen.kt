@@ -1,36 +1,37 @@
 package btm.m.todaywallpaper.ui.screens
 
-import androidx.activity.compose.BackHandler
-import androidx.activity.compose.PredictiveBackHandler
 import androidx.compose.animation.*
-import androidx.compose.animation.core.tween
+import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
-import androidx.compose.foundation.lazy.grid.items
+import androidx.compose.foundation.lazy.grid.items as gridItems
+import androidx.compose.foundation.lazy.staggeredgrid.LazyVerticalStaggeredGrid
+import androidx.compose.foundation.lazy.staggeredgrid.StaggeredGridCells
+import androidx.compose.foundation.lazy.staggeredgrid.items as staggeredItems
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material.icons.filled.Add
-import androidx.compose.material.icons.filled.Category
-import androidx.compose.material.icons.filled.Delete
-import androidx.compose.material.icons.filled.Explore
-import androidx.compose.material.icons.filled.Grid3x3
-import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.automirrored.rounded.ArrowBack
+import androidx.compose.material.icons.rounded.Add
+import androidx.compose.material.icons.rounded.Category
+import androidx.compose.material.icons.rounded.Delete
+import androidx.compose.material.icons.rounded.Grid3x3
+import androidx.compose.material.icons.rounded.Refresh
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.blur
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.graphicsLayer
-import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
@@ -42,6 +43,10 @@ import coil.compose.AsyncImage
 import btm.m.todaywallpaper.ui.viewmodel.WallpaperUiState
 import btm.m.todaywallpaper.ui.viewmodel.WallpaperViewModel
 import btm.m.todaywallpaper.ui.viewmodel.UnifiedWallpaper
+import btm.m.todaywallpaper.ui.widget.momentumBackTransform
+import btm.m.todaywallpaper.ui.widget.rememberMomentumPredictiveBack
+
+private enum class CategoryLibraryFilter { ALL, PEXELS, DEVIANTART, PIXABAY, WALLHAVEN, NEKOSIA }
 
 data class CategoryItem(
     val key: String,
@@ -50,7 +55,7 @@ data class CategoryItem(
     val zhDesc: String,
     val enDesc: String,
     val sampleUrl: String, // Banner artwork URL
-    val source: String // "Pexels" or "Nekosia"
+    val source: String // Search APIs or "Nekosia"
 )
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -73,48 +78,15 @@ fun CategoriesScreen(
         categories.find { it.key == selectedCategoryKey }
     }
 
-    var backProgress by remember { mutableStateOf(0f) }
-    var isBackSwiping by remember { mutableStateOf(false) }
-
-    LaunchedEffect(selectedCategory) {
-        if (selectedCategory != null) {
-            // Reset only when entering a new category, NOT when leaving
-            // This allows Crossfade exit to see backProgress=1 (shrunk state)
-            backProgress = 0f
-            isBackSwiping = false
-        }
-    }
-
-    if (selectedCategory != null) {
-        PredictiveBackHandler { progressFlow ->
-            try {
-                isBackSwiping = true
-                progressFlow.collect { backEvent ->
-                    backProgress = backEvent.progress
-                }
-                isBackSwiping = false
-                backProgress = 1f
-                viewModel.setSelectedCategoryKey(null)
-            } catch (e: Exception) {
-                isBackSwiping = false
-                backProgress = 0f
-            }
-        }
-    }
-
     Box(
         modifier = modifier
             .fillMaxSize()
             .background(MaterialTheme.colorScheme.background)
     ) {
-        Crossfade(
-            targetState = selectedCategory,
-            animationSpec = tween(durationMillis = 350),
-            label = "CategoryTransition"
-        ) { activeCategory ->
-            if (activeCategory == null) {
-                // Category List Screen
-                Column(
+        // Keep the category list mounted underneath the result page so the
+        // predictive-back transform reveals the actual caller.
+        Box(modifier = Modifier.fillMaxSize()) {
+            Column(
                     modifier = Modifier
                         .fillMaxSize()
                         .verticalScroll(categoriesScrollState)
@@ -137,32 +109,15 @@ fun CategoriesScreen(
                     )
                     Spacer(modifier = Modifier.height(24.dp))
 
-                    // Predefined Pexels Themes
-                    SectionTitle(
-                        icon = Icons.Filled.Explore,
-                        text = viewModel.getTranslation("高清摄影原宿 (Pexels)", "HD Photo Realism (Pexels)"),
-                        modifier = Modifier.fillMaxWidth()
-                    )
-                    Spacer(modifier = Modifier.height(12.dp))
-
-                    categories.filter { it.source == "Pexels" && !it.key.startsWith("custom_pexels_") }.forEach { item ->
-                        CategoryCard(item = item, viewModel = viewModel) {
-                            viewModel.setSelectedCategoryKey(item.key)
-                            viewModel.loadCategoryWallpapers(item.key)
-                        }
-                    }
-
-                    Spacer(modifier = Modifier.height(24.dp))
-
-                    // Custom Pexels Search Themes Creator
+                    // Custom search themes creator
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         SectionTitle(
-                            icon = Icons.Filled.Category,
-                            text = viewModel.getTranslation("自主定制板块 (Pexels 检索)", "Custom Themes (Pexels Query)"),
+                            icon = Icons.Rounded.Category,
+                            text = viewModel.getTranslation("分类检索", "Category Search"),
                             modifier = Modifier.weight(1f)
                         )
                         TextButton(
@@ -170,7 +125,7 @@ fun CategoriesScreen(
                             modifier = Modifier.testTag("add_custom_category_button")
                         ) {
                             Icon(
-                                imageVector = Icons.Filled.Add,
+                                imageVector = Icons.Rounded.Add,
                                 contentDescription = "Add custom category icon",
                                 tint = MaterialTheme.colorScheme.primary,
                                 modifier = Modifier.size(16.dp)
@@ -203,7 +158,7 @@ fun CategoriesScreen(
                             Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
                                     Icon(
-                                        imageVector = Icons.Filled.Add,
+                                        imageVector = Icons.Rounded.Add,
                                         contentDescription = "Add category outline icon",
                                         tint = MaterialTheme.colorScheme.primary,
                                         modifier = Modifier.size(24.dp)
@@ -226,47 +181,14 @@ fun CategoriesScreen(
                             }
                         }
 
-                        // Appended button card to keep adding custom categories
-                        Card(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .height(64.dp)
-                                .padding(vertical = 4.dp)
-                                .clickable { showAddCategoryDialog = true }
-                                .testTag("add_more_custom_card"),
-                            colors = CardDefaults.cardColors(
-                                containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.15f)
-                            ),
-                            shape = RoundedCornerShape(12.dp)
-                        ) {
-                            Row(
-                                modifier = Modifier.fillMaxSize().padding(horizontal = 16.dp),
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.Center
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Filled.Add,
-                                    contentDescription = "Add more custom category icon",
-                                    tint = MaterialTheme.colorScheme.primary,
-                                    modifier = Modifier.size(20.dp)
-                                )
-                                Spacer(modifier = Modifier.width(8.dp))
-                                Text(
-                                    text = viewModel.getTranslation("继续添加自定义分类", "Continue Adding Custom Themes"),
-                                    fontSize = 13.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    color = MaterialTheme.colorScheme.primary
-                                )
-                            }
-                        }
                     }
 
                     Spacer(modifier = Modifier.height(24.dp))
 
                     // Nekosia Illustration Header
                     SectionTitle(
-                        icon = Icons.Filled.Grid3x3,
-                        text = viewModel.getTranslation("动漫插画工坊 (Nekosia API)", "Anime Illustration Guild (Nekosia)"),
+                        icon = Icons.Rounded.Grid3x3,
+                        text = viewModel.getTranslation("Nekosia API", "Nekosia API"),
                         modifier = Modifier.fillMaxWidth()
                     )
                     Spacer(modifier = Modifier.height(12.dp))
@@ -280,32 +202,15 @@ fun CategoriesScreen(
                     
                     Spacer(modifier = Modifier.height(84.dp)) // Padding for bottom navbar safe bounds
                 }
-            } else {
-                // Active Category Grid Screen with Predictive Back animation
-                            val scale = 1f - (backProgress * 0.08f)
-                            val translationXDp = (backProgress * 120).dp
-                            val alpha = 1f - (backProgress * 0.2f)
-                            val cornerRadius = (backProgress * 24).dp
+            }
 
-                Box(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .graphicsLayer(
-                            scaleX = scale,
-                            scaleY = scale,
-                            translationX = with(LocalDensity.current) { translationXDp.toPx() },
-                            alpha = alpha,
-                            clip = cornerRadius > 0.dp,
-                            shape = RoundedCornerShape(cornerRadius)
-                        )
-                ) {
-                    CategoryGridView(
-                        category = activeCategory,
-                        viewModel = viewModel,
-                        onBack = { viewModel.setSelectedCategoryKey(null) },
-                        onViewDetail = onViewDetail
-                    )
-                }
+            selectedCategory?.let { activeCategory ->
+                CategoryLibraryLayer(
+                    category = activeCategory,
+                    viewModel = viewModel,
+                    onBack = { viewModel.setSelectedCategoryKey(null) },
+                    onViewDetail = onViewDetail
+                )
             }
         }
 
@@ -386,8 +291,8 @@ fun CategoriesScreen(
                             // Single Theme Creation View
                             Text(
                                 text = viewModel.getTranslation(
-                                    "输入分类名称与英文检索关键词。我们将在 Pexels 上实时检索并提取一张精美壁纸作为该分类的封面背景！",
-                                    "Provide a title and search key. We will query Pexels to instantly fetch a high-res cover image from live results!"
+                                    "输入分类名称与英文检索关键词。我们将通过已配置的图片 API 实时检索，并提取一张壁纸作为分类封面。",
+                                    "Provide a title and search key. Configured image APIs will fetch live results and select a category cover."
                                 ),
                                 fontSize = 12.sp,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.8f),
@@ -409,7 +314,7 @@ fun CategoriesScreen(
                             OutlinedTextField(
                                 value = searchQuery,
                                 onValueChange = { searchQuery = it },
-                                label = { Text(text = viewModel.getTranslation("Pexels 检索英文词 (例: cute cats sleeping)", "Pexels query (e.g., cute cats sleeping)")) },
+                                label = { Text(text = viewModel.getTranslation("检索英文词 (例: cute cats sleeping)", "Search query (e.g., cute cats sleeping)")) },
                                 placeholder = { Text(text = viewModel.getTranslation("支持多词检索，词数不限", "Multi-word queries supported, no length limit"), fontSize = 11.sp) },
                                 modifier = Modifier
                                     .fillMaxWidth()
@@ -497,7 +402,7 @@ fun CategoriesScreen(
                                                     }
                                                     if (isSelected) {
                                                         Icon(
-                                                            imageVector = Icons.Filled.Add,
+                                                            imageVector = Icons.Rounded.Add,
                                                             contentDescription = "Selected",
                                                             tint = MaterialTheme.colorScheme.primary,
                                                             modifier = Modifier.size(14.dp)
@@ -576,7 +481,7 @@ fun CategoriesScreen(
                                 )
                                 Spacer(modifier = Modifier.width(8.dp))
                                 Text(
-                                    text = viewModel.getTranslation("正在连接 Pexels 并检索验证...", "Querying Pexels API to validate..."),
+                                    text = viewModel.getTranslation("正在连接图片 API 并检索验证...", "Querying image APIs to validate..."),
                                     fontSize = 12.sp,
                                     color = MaterialTheme.colorScheme.primary
                                 )
@@ -652,7 +557,6 @@ fun CategoriesScreen(
             )
         }
     }
-}
 
 @Composable
 fun SectionTitle(
@@ -771,7 +675,7 @@ fun CategoryCard(
                     )
                 ) {
                     Icon(
-                        imageVector = Icons.Filled.Delete,
+                        imageVector = Icons.Rounded.Delete,
                         contentDescription = "Delete custom category icon",
                         modifier = Modifier.size(16.dp)
                     )
@@ -781,7 +685,14 @@ fun CategoryCard(
                     AlertDialog(
                         onDismissRequest = { showDeleteConfirm = false },
                         title = { Text(text = viewModel.getTranslation("删除自定义分类", "Delete Custom Theme")) },
-                        text = { Text(text = viewModel.getTranslation("确认要删除该自定义分类「${item.zhTitle}」吗？", "Are you sure you want to delete the custom category \"${item.enTitle}\"?")) },
+                        text = {
+                            Text(
+                                text = viewModel.getTranslation(
+                                    "确认要删除该自定义分类：${item.zhTitle}？",
+                                    "Delete the custom theme ${item.enTitle}?"
+                                )
+                            )
+                        },
                         confirmButton = {
                             Button(
                                 onClick = {
@@ -825,6 +736,351 @@ fun CategoryCard(
     }
 }
 
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+private fun CategoryLibraryLayer(
+    category: CategoryItem,
+    viewModel: WallpaperViewModel,
+    onBack: () -> Unit,
+    onViewDetail: (String, String, String?, String) -> Unit
+) {
+    val gridState by viewModel.categoryGridState.collectAsState()
+    val isLoadingMore by viewModel.isLoadingMore.collectAsState()
+    val predictiveEnabled by viewModel.predictiveBackEnabled.collectAsState()
+    val predictiveMaxProgress by viewModel.predictiveBackMaxProgress.collectAsState()
+    val wallpaperDetail by viewModel.detailWallpaper.collectAsState()
+    val blurNsfw by viewModel.blurNsfw.collectAsState()
+    val title = if (viewModel.language.collectAsState().value == "zh") {
+        category.zhTitle
+    } else {
+        category.enTitle
+    }
+    var filter by remember(category.key) { mutableStateOf(CategoryLibraryFilter.ALL) }
+    val backState = rememberMomentumPredictiveBack(
+        enabled = predictiveEnabled,
+        maxProgressPercent = predictiveMaxProgress,
+        onBack = onBack,
+        handlerEnabled = wallpaperDetail == null
+    )
+
+    val wallpapers = (gridState as? WallpaperUiState.Success)?.data.orEmpty()
+    val visibleWallpapers = remember(wallpapers, filter) {
+        wallpapers.filter { wallpaper ->
+            when (filter) {
+                CategoryLibraryFilter.ALL -> true
+                CategoryLibraryFilter.PEXELS -> wallpaper.source.equals("Pexels", true)
+                CategoryLibraryFilter.DEVIANTART -> wallpaper.source.equals("DeviantArt", true)
+                CategoryLibraryFilter.PIXABAY -> wallpaper.source.equals("Pixabay", true)
+                CategoryLibraryFilter.WALLHAVEN -> wallpaper.source.equals("Wallhaven", true)
+                CategoryLibraryFilter.NEKOSIA -> wallpaper.source.equals("Nekosia", true)
+            }
+        }
+    }
+    val libraryEntries = remember(visibleWallpapers) {
+        visibleWallpapers.map { wallpaper ->
+            LibraryWallpaper(
+                id = wallpaper.id,
+                imageUrl = wallpaper.imageUrl,
+                thumbnailUrl = wallpaper.thumbnailUrl,
+                author = wallpaper.author,
+                source = wallpaper.source,
+                category = wallpaper.category
+            )
+        }
+    }
+
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .momentumBackTransform(backState)
+            .background(MaterialTheme.colorScheme.background)
+            .statusBarsPadding()
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .heightIn(min = 64.dp)
+                .padding(horizontal = 8.dp, vertical = 6.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            IconButton(
+                onClick = onBack,
+                modifier = Modifier.testTag("category_grid_back")
+            ) {
+                Icon(
+                    Icons.AutoMirrored.Rounded.ArrowBack,
+                    "Back",
+                    tint = MaterialTheme.colorScheme.onBackground
+                )
+            }
+            Column(Modifier.weight(1f)) {
+                Text(
+                    text = title,
+                    fontSize = 22.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.onBackground,
+                    maxLines = 1
+                )
+                Text(
+                    text = viewModel.getTranslation(
+                        if (category.source == "Nekosia") {
+                            "${visibleWallpapers.size} 张壁纸 · Nekosia"
+                        } else {
+                            "${visibleWallpapers.size} 张壁纸 · Pexels + DeviantArt + Pixabay + Wallhaven"
+                        },
+                        if (category.source == "Nekosia") {
+                            "${visibleWallpapers.size} wallpapers · Nekosia"
+                        } else {
+                            "${visibleWallpapers.size} wallpapers · Pexels + DeviantArt + Pixabay + Wallhaven"
+                        }
+                    ),
+                    fontSize = 12.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1
+                )
+            }
+            IconButton(
+                onClick = { viewModel.loadCategoryWallpapers(category.key) },
+                modifier = Modifier.testTag("category_grid_retry")
+            ) {
+                Icon(
+                    Icons.Rounded.Refresh,
+                    "Refresh",
+                    tint = MaterialTheme.colorScheme.onBackground
+                )
+            }
+        }
+
+        LazyRow(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp, vertical = 8.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            item {
+                CategoryFilterCapsule(
+                    label = viewModel.getTranslation("全部", "All"),
+                    selected = filter == CategoryLibraryFilter.ALL,
+                    onClick = { filter = CategoryLibraryFilter.ALL }
+                )
+            }
+            if (category.source == "Nekosia") {
+                item {
+                    CategoryFilterCapsule(
+                        label = "Nekosia",
+                        selected = filter == CategoryLibraryFilter.NEKOSIA,
+                        onClick = { filter = CategoryLibraryFilter.NEKOSIA }
+                    )
+                }
+            } else {
+                item {
+                    CategoryFilterCapsule(
+                        label = "Pexels",
+                        selected = filter == CategoryLibraryFilter.PEXELS,
+                        onClick = { filter = CategoryLibraryFilter.PEXELS }
+                    )
+                }
+                item {
+                    CategoryFilterCapsule(
+                        label = "DeviantArt",
+                        selected = filter == CategoryLibraryFilter.DEVIANTART,
+                        onClick = { filter = CategoryLibraryFilter.DEVIANTART }
+                    )
+                }
+                item {
+                    CategoryFilterCapsule(
+                        label = "Pixabay",
+                        selected = filter == CategoryLibraryFilter.PIXABAY,
+                        onClick = { filter = CategoryLibraryFilter.PIXABAY }
+                    )
+                }
+                item {
+                    CategoryFilterCapsule(
+                        label = "Wallhaven",
+                        selected = filter == CategoryLibraryFilter.WALLHAVEN,
+                        onClick = { filter = CategoryLibraryFilter.WALLHAVEN }
+                    )
+                }
+            }
+        }
+
+        Box(Modifier.fillMaxSize()) {
+            when (val state = gridState) {
+                WallpaperUiState.Loading -> {
+                    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                        CircularProgressIndicator(color = MaterialTheme.colorScheme.primary)
+                    }
+                }
+
+                is WallpaperUiState.Error -> {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .padding(32.dp),
+                        verticalArrangement = Arrangement.Center,
+                        horizontalAlignment = Alignment.CenterHorizontally
+                    ) {
+                        Text(
+                            text = viewModel.getTranslation("网络资源加载失败", "API Retrieval Failed"),
+                            fontSize = 17.sp,
+                            fontWeight = FontWeight.Bold,
+                            textAlign = TextAlign.Center
+                        )
+                        Spacer(Modifier.height(8.dp))
+                        Text(
+                            text = state.message,
+                            fontSize = 12.sp,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            textAlign = TextAlign.Center
+                        )
+                        Spacer(Modifier.height(16.dp))
+                        Button(onClick = { viewModel.loadCategoryWallpapers(category.key) }) {
+                            Text(viewModel.getTranslation("重新加载", "Reload"))
+                        }
+                    }
+                }
+
+                is WallpaperUiState.Success -> {
+                    if (visibleWallpapers.isEmpty()) {
+                        EmptyStateView(viewModel.getTranslation("暂无壁纸", "No wallpapers found"))
+                    } else {
+                        LazyVerticalStaggeredGrid(
+                            columns = StaggeredGridCells.Fixed(2),
+                            contentPadding = PaddingValues(
+                                start = 16.dp,
+                                end = 16.dp,
+                                bottom = 34.dp
+                            ),
+                            horizontalArrangement = Arrangement.spacedBy(10.dp),
+                            verticalItemSpacing = 10.dp,
+                            modifier = Modifier.fillMaxSize()
+                        ) {
+                            staggeredItems(visibleWallpapers, key = { it.id }) { wallpaper ->
+                                CategoryWaterfallCard(
+                                    wallpaper = wallpaper,
+                                    blurPreview = blurNsfw && wallpaper.isNsfw,
+                                    modifier = Modifier.clickable {
+                                        onViewDetail(
+                                            wallpaper.id,
+                                            wallpaper.imageUrl,
+                                            wallpaper.author,
+                                            wallpaper.source
+                                        )
+                                    }
+                                )
+                            }
+                            if (isLoadingMore) {
+                                item(key = "category_loading_more") {
+                                    Box(
+                                        Modifier
+                                            .fillMaxWidth()
+                                            .padding(vertical = 18.dp),
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        CircularProgressIndicator(
+                                            modifier = Modifier.size(26.dp),
+                                            strokeWidth = 2.5.dp
+                                        )
+                                    }
+                                }
+                            } else {
+                                item(key = "category_load_more_trigger") {
+                                    LaunchedEffect(visibleWallpapers.size) {
+                                        viewModel.loadMoreCategoryWallpapers()
+                                    }
+                                    Spacer(Modifier.height(1.dp))
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+}
+
+@Composable
+private fun CategoryFilterCapsule(label: String, selected: Boolean, onClick: () -> Unit) {
+    Surface(
+        onClick = onClick,
+        shape = RoundedCornerShape(50),
+        color = if (selected) MaterialTheme.colorScheme.primaryContainer else Color.Transparent,
+        border = if (selected) null else BorderStroke(
+            1.dp,
+            MaterialTheme.colorScheme.outline.copy(alpha = .55f)
+        )
+    ) {
+        Text(
+            text = label,
+            modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
+            color = if (selected) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurfaceVariant,
+            fontSize = 13.sp,
+            fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium
+        )
+    }
+}
+
+@Composable
+private fun CategoryWaterfallCard(
+    wallpaper: UnifiedWallpaper,
+    blurPreview: Boolean,
+    modifier: Modifier = Modifier
+) {
+    Card(
+        modifier = modifier
+            .fillMaxWidth()
+            .aspectRatio(categoryWaterfallRatio(wallpaper.id))
+            .clip(RoundedCornerShape(16.dp)),
+        shape = RoundedCornerShape(16.dp),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.surfaceVariant
+        )
+    ) {
+        Box(Modifier.fillMaxSize()) {
+            AsyncImage(
+                model = wallpaper.thumbnailUrl,
+                contentDescription = wallpaper.author,
+                modifier = Modifier
+                    .fillMaxSize()
+                    .then(if (blurPreview) Modifier.blur(18.dp) else Modifier),
+                contentScale = ContentScale.Crop
+            )
+            Box(
+                Modifier
+                    .fillMaxSize()
+                    .background(
+                        Brush.verticalGradient(
+                            listOf(Color.Transparent, Color.Transparent, Color.Black.copy(.74f))
+                        )
+                    )
+            )
+            Column(Modifier.align(Alignment.BottomStart).padding(11.dp)) {
+                Text(
+                    text = wallpaper.author ?: "@Artist",
+                    color = Color.White,
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    maxLines = 1
+                )
+                Text(
+                    text = wallpaper.source,
+                    color = Color.White.copy(.72f),
+                    fontSize = 10.sp,
+                    maxLines = 1
+                )
+            }
+        }
+    }
+}
+
+private fun categoryWaterfallRatio(key: String): Float = when ((key.hashCode() and Int.MAX_VALUE) % 4) {
+    0 -> .62f
+    1 -> .74f
+    2 -> .86f
+    else -> .68f
+}
+
 @Composable
 fun CategoryGridView(
     category: CategoryItem,
@@ -853,7 +1109,7 @@ fun CategoryGridView(
                 modifier = Modifier.testTag("category_grid_back")
             ) {
                 Icon(
-                    imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+                    imageVector = Icons.AutoMirrored.Rounded.ArrowBack,
                     contentDescription = "Back",
                     tint = MaterialTheme.colorScheme.onBackground
                 )
@@ -882,7 +1138,7 @@ fun CategoryGridView(
                 modifier = Modifier.testTag("category_grid_retry")
             ) {
                 Icon(
-                    imageVector = Icons.Filled.Refresh,
+                    imageVector = Icons.Rounded.Refresh,
                     contentDescription = "Refresh Grid",
                     tint = MaterialTheme.colorScheme.onBackground
                 )
@@ -917,7 +1173,7 @@ fun CategoryGridView(
                             verticalArrangement = Arrangement.spacedBy(8.dp),
                             modifier = Modifier.fillMaxSize()
                         ) {
-                            items(list, key = { it.id }) { wallpaper ->
+                            gridItems(list, key = { it.id }) { wallpaper ->
                                 GridWallpaperTile(wallpaper = wallpaper) {
                                     onViewDetail(
                                         wallpaper.id,
@@ -1051,7 +1307,7 @@ fun EmptyStateView(message: String) {
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
         Icon(
-            imageVector = Icons.Filled.Category,
+            imageVector = Icons.Rounded.Category,
             contentDescription = "Empty",
             tint = MaterialTheme.colorScheme.secondary.copy(alpha = 0.4f),
             modifier = Modifier.size(54.dp)

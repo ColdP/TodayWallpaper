@@ -10,11 +10,16 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import coil.ImageLoader
 import coil.request.ImageRequest
+import btm.m.todaywallpaper.data.model.AlbumCategory
 import btm.m.todaywallpaper.data.model.FavoriteWallpaper
+import btm.m.todaywallpaper.data.model.HistoryWallpaper
 import btm.m.todaywallpaper.data.model.WallpaperCollection
 import btm.m.todaywallpaper.data.model.CollectionItem
+import btm.m.todaywallpaper.data.model.DeviantArtDeviation
 import btm.m.todaywallpaper.data.repository.WallpaperRepository
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -23,6 +28,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.Job
 import org.json.JSONArray
 import org.json.JSONObject
 import btm.m.todaywallpaper.ui.screens.CategoryItem
@@ -34,6 +40,16 @@ sealed interface Screen {
     object Home : Screen
     object Categories : Screen
     object Mine : Screen
+}
+
+/** Destinations shown above the Mine dashboard. */
+sealed interface MineDestination {
+    object Dashboard : MineDestination
+    object Collections : MineDestination
+    object History : MineDestination
+    object Favorites : MineDestination
+    object About : MineDestination
+    data class CollectionDetail(val collectionId: Int) : MineDestination
 }
 
 // Shared detail wallpaper wrapper class
@@ -56,8 +72,19 @@ data class UnifiedWallpaper(
     val thumbnailUrl: String,
     val author: String?,
     val authorUrl: String?,
-    val source: String, // "Pexels" or "Nekosia"
-    val category: String? = null
+    val source: String, // "Pexels", "DeviantArt", "Pixabay", "Wallhaven", or "Nekosia"
+    val category: String? = null,
+    val isNsfw: Boolean = false
+)
+
+data class CollectionCreationResult(
+    val collectionId: Int,
+    val importedImageCount: Int
+)
+
+data class CreateCollectionOverlayRequest(
+    val sourceWallpaper: UnifiedWallpaper? = null,
+    val requireLocalImages: Boolean = true
 )
 
 class WallpaperViewModel(application: Application) : AndroidViewModel(application) {
@@ -76,6 +103,12 @@ class WallpaperViewModel(application: Application) : AndroidViewModel(applicatio
 
     private val repository = WallpaperRepository(application)
 
+    init {
+        viewModelScope.launch {
+            repository.ensureDefaultAlbumCategories()
+        }
+    }
+
     // ==========================================
     // Navigation and detail state flows
     // ==========================================
@@ -84,6 +117,15 @@ class WallpaperViewModel(application: Application) : AndroidViewModel(applicatio
 
     fun setActiveScreen(screen: Screen) {
         _activeScreen.value = screen
+        if (screen != Screen.Mine) setMineDestination(MineDestination.Dashboard)
+    }
+
+    private val _mineDestination = MutableStateFlow<MineDestination>(MineDestination.Dashboard)
+    val mineDestination: StateFlow<MineDestination> = _mineDestination.asStateFlow()
+
+    fun setMineDestination(destination: MineDestination) {
+        _mineDestination.value = destination
+        _isAboutPageVisible.value = destination is MineDestination.About
     }
 
     private val _detailWallpaper = MutableStateFlow<DetailWallpaperData?>(null)
@@ -91,6 +133,18 @@ class WallpaperViewModel(application: Application) : AndroidViewModel(applicatio
 
     fun setDetailWallpaper(detail: DetailWallpaperData?) {
         _detailWallpaper.value = detail
+        if (detail != null && detail.id.isNotBlank() && detail.imageUrl.isNotBlank()) {
+            recordViewedWallpaper(
+                UnifiedWallpaper(
+                    id = detail.id,
+                    imageUrl = detail.imageUrl,
+                    thumbnailUrl = detail.imageUrl,
+                    author = detail.author,
+                    authorUrl = null,
+                    source = detail.source
+                )
+            )
+        }
         // Reset fullscreen when closing detail
         if (detail == null) _isDetailFullscreen.value = false
     }
@@ -116,17 +170,22 @@ class WallpaperViewModel(application: Application) : AndroidViewModel(applicatio
     private val _detailBackProgress = MutableStateFlow(0f)
     val detailBackProgress: StateFlow<Float> = _detailBackProgress.asStateFlow()
 
+    private val _detailBackDirection = MutableStateFlow(1f)
+    val detailBackDirection: StateFlow<Float> = _detailBackDirection.asStateFlow()
+
     private val _isDetailBackSwiping = MutableStateFlow(false)
     val isDetailBackSwiping: StateFlow<Boolean> = _isDetailBackSwiping.asStateFlow()
 
-    fun setDetailBackGesture(progress: Float, swiping: Boolean) {
+    fun setDetailBackGesture(progress: Float, swiping: Boolean, direction: Float = _detailBackDirection.value) {
         _detailBackProgress.value = progress.coerceIn(0f, 1f)
         _isDetailBackSwiping.value = swiping
+        _detailBackDirection.value = if (direction < 0f) -1f else 1f
     }
 
     fun resetDetailBackGesture() {
         _detailBackProgress.value = 0f
         _isDetailBackSwiping.value = false
+        _detailBackDirection.value = 1f
     }
 
     private val _selectedCategoryKey = MutableStateFlow<String?>(null)
@@ -142,11 +201,46 @@ class WallpaperViewModel(application: Application) : AndroidViewModel(applicatio
     val favorites: StateFlow<List<FavoriteWallpaper>> = repository.allFavorites
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
+    val history: StateFlow<List<HistoryWallpaper>> = repository.recentHistory
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
     val collections: StateFlow<List<WallpaperCollection>> = repository.allCollections
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    val albumCategories: StateFlow<List<AlbumCategory>> = repository.allAlbumCategories
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
     private val _activeCollectionItems = MutableStateFlow<List<CollectionItem>>(emptyList())
     val activeCollectionItems = _activeCollectionItems.asStateFlow()
+    private var activeCollectionItemsJob: Job? = null
+
+    private val _createCollectionOverlayRequest = MutableStateFlow<CreateCollectionOverlayRequest?>(null)
+    val createCollectionOverlayRequest = _createCollectionOverlayRequest.asStateFlow()
+
+    private val _profileOverlayVisible = MutableStateFlow(false)
+    val profileOverlayVisible: StateFlow<Boolean> = _profileOverlayVisible.asStateFlow()
+
+    fun showCreateCollectionOverlay(
+        sourceWallpaper: UnifiedWallpaper? = null,
+        requireLocalImages: Boolean = sourceWallpaper == null
+    ) {
+        _createCollectionOverlayRequest.value = CreateCollectionOverlayRequest(
+            sourceWallpaper = sourceWallpaper,
+            requireLocalImages = requireLocalImages
+        )
+    }
+
+    fun dismissCreateCollectionOverlay() {
+        _createCollectionOverlayRequest.value = null
+    }
+
+    fun showProfileOverlay() {
+        _profileOverlayVisible.value = true
+    }
+
+    fun dismissProfileOverlay() {
+        _profileOverlayVisible.value = false
+    }
 
 
     // ==========================================
@@ -169,6 +263,30 @@ class WallpaperViewModel(application: Application) : AndroidViewModel(applicatio
 
     private val _pexelsApiKey = MutableStateFlow("")
     val pexelsApiKey: StateFlow<String> = _pexelsApiKey.asStateFlow()
+
+    private val _pixabayApiKey = MutableStateFlow("")
+    val pixabayApiKey: StateFlow<String> = _pixabayApiKey.asStateFlow()
+
+    private val _wallhavenApiKey = MutableStateFlow("")
+    val wallhavenApiKey: StateFlow<String> = _wallhavenApiKey.asStateFlow()
+
+    private val _deviantArtClientId = MutableStateFlow("")
+    val deviantArtClientId: StateFlow<String> = _deviantArtClientId.asStateFlow()
+
+    private val _deviantArtClientSecret = MutableStateFlow("")
+    val deviantArtClientSecret: StateFlow<String> = _deviantArtClientSecret.asStateFlow()
+
+    private val _nekosiaNsfwEnabled = MutableStateFlow(false)
+    val nekosiaNsfwEnabled: StateFlow<Boolean> = _nekosiaNsfwEnabled.asStateFlow()
+
+    private val _wallhavenNsfwEnabled = MutableStateFlow(false)
+    val wallhavenNsfwEnabled: StateFlow<Boolean> = _wallhavenNsfwEnabled.asStateFlow()
+
+    private val _deviantArtNsfwEnabled = MutableStateFlow(false)
+    val deviantArtNsfwEnabled: StateFlow<Boolean> = _deviantArtNsfwEnabled.asStateFlow()
+
+    private val _blurNsfw = MutableStateFlow(true)
+    val blurNsfw: StateFlow<Boolean> = _blurNsfw.asStateFlow()
 
     // Liquid Glass blur radius in dp (0f ~ 80f), default 8f
     private val _liquidGlassBlur = MutableStateFlow(8f)
@@ -246,7 +364,7 @@ class WallpaperViewModel(application: Application) : AndroidViewModel(applicatio
         mainViewModelInstance?.let { main -> if (main !== this) main._lgElastic.value = enabled }
     }
 
-    private val _lgTouchEffect = MutableStateFlow(false)
+    private val _lgTouchEffect = MutableStateFlow(true)
     val lgTouchEffect: StateFlow<Boolean> = _lgTouchEffect.asStateFlow()
 
     fun setLgTouchEffect(enabled: Boolean) {
@@ -302,9 +420,151 @@ class WallpaperViewModel(application: Application) : AndroidViewModel(applicatio
     }
 
     fun updatePexelsApiKey(key: String) {
-        _pexelsApiKey.value = key
+        _pexelsApiKey.value = key.trim()
         val sp = getApplication<Application>().getSharedPreferences("app_gallery_prefs", Application.MODE_PRIVATE)
-        sp.edit().putString("pexels_api_key", key).apply()
+        sp.edit().putString("pexels_api_key", _pexelsApiKey.value).apply()
+        mainViewModelInstance?.let { main ->
+            if (main !== this) main._pexelsApiKey.value = _pexelsApiKey.value
+        }
+    }
+
+    fun updatePixabayApiKey(key: String) {
+        _pixabayApiKey.value = key.trim()
+        val sp = getApplication<Application>().getSharedPreferences("app_gallery_prefs", Application.MODE_PRIVATE)
+        sp.edit().putString("pixabay_api_key", _pixabayApiKey.value).apply()
+        mainViewModelInstance?.let { main ->
+            if (main !== this) main._pixabayApiKey.value = _pixabayApiKey.value
+        }
+    }
+
+    fun updateWallhavenApiKey(key: String) {
+        _wallhavenApiKey.value = key.trim()
+        if (_wallhavenApiKey.value.isBlank()) {
+            _wallhavenNsfwEnabled.value = false
+            synchronized(_preloadPool) {
+                _preloadPool.clear()
+                preloadPoolType = ""
+            }
+        }
+        val sp = getApplication<Application>().getSharedPreferences("app_gallery_prefs", Application.MODE_PRIVATE)
+        sp.edit()
+            .putString("wallhaven_api_key", _wallhavenApiKey.value)
+            .putBoolean("wallhaven_nsfw_enabled", _wallhavenNsfwEnabled.value)
+            .apply()
+        mainViewModelInstance?.let { main ->
+            if (main !== this) {
+                main._wallhavenApiKey.value = _wallhavenApiKey.value
+                if (_wallhavenApiKey.value.isBlank()) {
+                    main._wallhavenNsfwEnabled.value = false
+                    synchronized(main._preloadPool) {
+                        main._preloadPool.clear()
+                        main.preloadPoolType = ""
+                    }
+                    main.reloadActiveCategory()
+                }
+            }
+        }
+    }
+
+    fun updateDeviantArtCredentials(clientId: String, clientSecret: String) {
+        _deviantArtClientId.value = clientId.trim()
+        _deviantArtClientSecret.value = clientSecret.trim()
+        if (_deviantArtClientId.value.isBlank() || _deviantArtClientSecret.value.isBlank()) {
+            _deviantArtNsfwEnabled.value = false
+        }
+        val sp = getApplication<Application>().getSharedPreferences("app_gallery_prefs", Application.MODE_PRIVATE)
+        sp.edit()
+            .putString("deviantart_client_id", _deviantArtClientId.value)
+            .putString("deviantart_client_secret", _deviantArtClientSecret.value)
+            .putBoolean("deviantart_nsfw_enabled", _deviantArtNsfwEnabled.value)
+            .apply()
+        mainViewModelInstance?.let { main ->
+            if (main !== this) {
+                main._deviantArtClientId.value = _deviantArtClientId.value
+                main._deviantArtClientSecret.value = _deviantArtClientSecret.value
+                if (_deviantArtClientId.value.isBlank() || _deviantArtClientSecret.value.isBlank()) {
+                    main._deviantArtNsfwEnabled.value = false
+                }
+            }
+        }
+    }
+
+    fun setDeviantArtNsfwEnabled(enabled: Boolean): Boolean {
+        if (enabled && (_deviantArtClientId.value.isBlank() || _deviantArtClientSecret.value.isBlank())) {
+            return false
+        }
+        _deviantArtNsfwEnabled.value = enabled
+        persistBool("deviantart_nsfw_enabled", enabled)
+        synchronized(_preloadPool) {
+            _preloadPool.clear()
+            preloadPoolType = ""
+        }
+        mainViewModelInstance?.let { main ->
+            if (main !== this) {
+                main._deviantArtNsfwEnabled.value = enabled
+                synchronized(main._preloadPool) {
+                    main._preloadPool.clear()
+                    main.preloadPoolType = ""
+                }
+                main.reloadActiveCategory()
+            }
+        }
+        reloadActiveCategory()
+        return true
+    }
+
+    fun setNekosiaNsfwEnabled(enabled: Boolean) {
+        _nekosiaNsfwEnabled.value = enabled
+        persistBool("nekosia_nsfw_enabled", enabled)
+        synchronized(_preloadPool) {
+            _preloadPool.clear()
+            preloadPoolType = ""
+        }
+        mainViewModelInstance?.let { main ->
+            if (main !== this) {
+                main._nekosiaNsfwEnabled.value = enabled
+                synchronized(main._preloadPool) {
+                    main._preloadPool.clear()
+                    main.preloadPoolType = ""
+                }
+                main.reloadActiveCategory()
+            }
+        }
+        reloadActiveCategory()
+    }
+
+    fun setWallhavenNsfwEnabled(enabled: Boolean): Boolean {
+        if (enabled && _wallhavenApiKey.value.isBlank()) return false
+        _wallhavenNsfwEnabled.value = enabled
+        persistBool("wallhaven_nsfw_enabled", enabled)
+        synchronized(_preloadPool) {
+            _preloadPool.clear()
+            preloadPoolType = ""
+        }
+        mainViewModelInstance?.let { main ->
+            if (main !== this) {
+                main._wallhavenNsfwEnabled.value = enabled
+                synchronized(main._preloadPool) {
+                    main._preloadPool.clear()
+                    main.preloadPoolType = ""
+                }
+                main.reloadActiveCategory()
+            }
+        }
+        reloadActiveCategory()
+        return true
+    }
+
+    fun setBlurNsfw(enabled: Boolean) {
+        _blurNsfw.value = enabled
+        persistBool("blur_nsfw", enabled)
+        mainViewModelInstance?.let { main ->
+            if (main !== this) main._blurNsfw.value = enabled
+        }
+    }
+
+    private fun reloadActiveCategory() {
+        if (currentCategoryKey.isNotBlank()) loadCategoryWallpapersInternal(currentCategoryKey)
     }
 
     fun performWithApiKeyCheck(action: () -> Unit) {
@@ -420,6 +680,8 @@ class WallpaperViewModel(application: Application) : AndroidViewModel(applicatio
     // Pagination state for infinite scrolling in category grid
     private var currentCategoryPage = 1
     private var currentCategoryKey = ""
+    private var currentCategoryDeviantArtOffset: Int? = null
+    private var categoryLoadJob: Job? = null
     private var isLoadingMoreCategory = false
     private var hasMoreCategoryPages = true
     private val _isLoadingMore = MutableStateFlow(false)
@@ -448,6 +710,32 @@ class WallpaperViewModel(application: Application) : AndroidViewModel(applicatio
         sp.edit().putBoolean("home_gesture_enabled", enabled).apply()
     }
 
+    // Momentum-style predictive back preferences
+    private val _predictiveBackEnabled = MutableStateFlow(true)
+    val predictiveBackEnabled: StateFlow<Boolean> = _predictiveBackEnabled.asStateFlow()
+
+    private val _predictiveBackMaxProgress = MutableStateFlow(40)
+    val predictiveBackMaxProgress: StateFlow<Int> = _predictiveBackMaxProgress.asStateFlow()
+
+    fun setPredictiveBackEnabled(enabled: Boolean) {
+        _predictiveBackEnabled.value = enabled
+        getApplication<Application>().getSharedPreferences("app_gallery_prefs", Application.MODE_PRIVATE)
+            .edit().putBoolean("predictive_back_enabled", enabled).apply()
+        mainViewModelInstance?.let { main ->
+            if (main !== this) main._predictiveBackEnabled.value = enabled
+        }
+    }
+
+    fun setPredictiveBackMaxProgress(progress: Int) {
+        val clamped = progress.coerceIn(10, 100)
+        _predictiveBackMaxProgress.value = clamped
+        getApplication<Application>().getSharedPreferences("app_gallery_prefs", Application.MODE_PRIVATE)
+            .edit().putInt("predictive_back_max_progress", clamped).apply()
+        mainViewModelInstance?.let { main ->
+            if (main !== this) main._predictiveBackMaxProgress.value = clamped
+        }
+    }
+
     private val _wallpaperSettingState = MutableStateFlow<SettingWallpaperState>(SettingWallpaperState.Idle)
     val wallpaperSettingState = _wallpaperSettingState.asStateFlow()
 
@@ -456,6 +744,30 @@ class WallpaperViewModel(application: Application) : AndroidViewModel(applicatio
         object Setting : SettingWallpaperState
         object Success : SettingWallpaperState
         data class Error(val message: String) : SettingWallpaperState
+    }
+
+    // Wallpaper scope preferences
+    enum class WallpaperScope(val key: String, val zhLabel: String, val enLabel: String) {
+        ASK_EVERY_TIME("ask_every_time", "每次询问", "Ask Every Time"),
+        HOME_SCREEN("home_screen", "桌面", "Home Screen"),
+        LOCK_SCREEN("lock_screen", "锁屏", "Lock Screen"),
+        BOTH("both", "桌面与锁屏", "Home & Lock Screen");
+
+        companion object {
+            fun fromKey(key: String): WallpaperScope {
+                return entries.find { it.key == key } ?: ASK_EVERY_TIME
+            }
+        }
+    }
+
+    private val _wallpaperScope = MutableStateFlow(WallpaperScope.ASK_EVERY_TIME)
+    val wallpaperScope: StateFlow<WallpaperScope> = _wallpaperScope.asStateFlow()
+
+    fun setWallpaperScope(scope: WallpaperScope) {
+        _wallpaperScope.value = scope
+        val sp = getApplication<Application>().getSharedPreferences("app_gallery_prefs", Application.MODE_PRIVATE)
+        sp.edit().putString("wallpaper_scope", scope.key).apply()
+        mainViewModelInstance?.let { main -> if (main !== this) main._wallpaperScope.value = scope }
     }
 
     init {
@@ -477,7 +789,19 @@ class WallpaperViewModel(application: Application) : AndroidViewModel(applicatio
         _avatarUrl.value = sp.getString("avatar_url", null)
         _profileSubtitle.value = sp.getString("profile_subtitle", "") ?: ""
         _pexelsApiKey.value = sp.getString("pexels_api_key", "") ?: ""
+        _pixabayApiKey.value = sp.getString("pixabay_api_key", "") ?: ""
+        _wallhavenApiKey.value = sp.getString("wallhaven_api_key", "") ?: ""
+        _deviantArtClientId.value = sp.getString("deviantart_client_id", "") ?: ""
+        _deviantArtClientSecret.value = sp.getString("deviantart_client_secret", "") ?: ""
+        _nekosiaNsfwEnabled.value = sp.getBoolean("nekosia_nsfw_enabled", false)
+        _wallhavenNsfwEnabled.value = sp.getBoolean("wallhaven_nsfw_enabled", false) &&
+            _wallhavenApiKey.value.isNotBlank()
+        _deviantArtNsfwEnabled.value = sp.getBoolean("deviantart_nsfw_enabled", false) &&
+            _deviantArtClientId.value.isNotBlank() && _deviantArtClientSecret.value.isNotBlank()
+        _blurNsfw.value = sp.getBoolean("blur_nsfw", true)
         _homeGestureEnabled.value = sp.getBoolean("home_gesture_enabled", false)
+        _predictiveBackEnabled.value = sp.getBoolean("predictive_back_enabled", true)
+        _predictiveBackMaxProgress.value = sp.getInt("predictive_back_max_progress", 40).coerceIn(10, 100)
         _liquidGlassBlur.value = sp.getFloat("liquid_glass_blur", 8f)
         _liquidGlassAdvanced.value = sp.getBoolean("liquid_glass_advanced", false)
         _lgRefractionHeight.value = sp.getFloat("lg_refraction_height", 20f)
@@ -486,7 +810,8 @@ class WallpaperViewModel(application: Application) : AndroidViewModel(applicatio
         _lgDispersion.value = sp.getFloat("lg_dispersion", 0f)
         _lgDraggable.value = sp.getBoolean("lg_draggable", false)
         _lgElastic.value = sp.getBoolean("lg_elastic", false)
-        _lgTouchEffect.value = sp.getBoolean("lg_touch_effect", false)
+        _lgTouchEffect.value = sp.getBoolean("lg_touch_effect", true)
+        _wallpaperScope.value = WallpaperScope.fromKey(sp.getString("wallpaper_scope", WallpaperScope.ASK_EVERY_TIME.key) ?: WallpaperScope.ASK_EVERY_TIME.key)
     }
 
     fun updateUsername(newName: String) {
@@ -567,7 +892,7 @@ class WallpaperViewModel(application: Application) : AndroidViewModel(applicatio
 
     fun fetchTodayWallpaper() {
         val type = _homeWallpaperType.value
-        if (!type.startsWith("Nekosia") && _pexelsApiKey.value.isEmpty()) {
+        if (!type.startsWith("Nekosia") && type != "Wallhaven" && _pexelsApiKey.value.isEmpty()) {
             performWithApiKeyCheck {
                 fetchTodayWallpaperInternal()
             }
@@ -719,7 +1044,11 @@ class WallpaperViewModel(application: Application) : AndroidViewModel(applicatio
                 }
             } else if (type.startsWith("Nekosia")) {
                 val categoryName = type.removePrefix("Nekosia:")
-                val result = repository.getNekosiaRandom(category = categoryName, count = 5)
+                val result = repository.getNekosiaRandom(
+                    category = categoryName,
+                    count = 5,
+                    includeNsfw = _nekosiaNsfwEnabled.value
+                )
                 result.onSuccess { list ->
                     if (list.isNotEmpty()) {
                         val target = if (list.size == 1) {
@@ -748,7 +1077,8 @@ class WallpaperViewModel(application: Application) : AndroidViewModel(applicatio
                             author = target.attribution?.artist?.username ?: "Nekosia Artist",
                             authorUrl = target.attribution?.artist?.profile,
                             source = "Nekosia",
-                            category = categoryName
+                            category = categoryName,
+                            isNsfw = target.rating?.equals("safe", ignoreCase = true) == false
                         )
                         _todayWallpaper.value = WallpaperUiState.Success(item)
                         recordWallpaperHistory(item)
@@ -759,6 +1089,33 @@ class WallpaperViewModel(application: Application) : AndroidViewModel(applicatio
                     }
                 }.onFailure {
                     _todayWallpaper.value = WallpaperUiState.Error(it.localizedMessage ?: "Network error")
+                }
+            } else if (type == "Wallhaven") {
+                repository.searchWallhaven(
+                    query = "",
+                    page = (1..10).random(),
+                    includeNsfw = _wallhavenNsfwEnabled.value
+                ).onSuccess { response ->
+                    val target = response.data.randomOrNull()
+                    if (target != null) {
+                        val item = UnifiedWallpaper(
+                            id = "wallhaven_${target.id}",
+                            imageUrl = target.path,
+                            thumbnailUrl = target.thumbs.large,
+                            author = "Wallhaven",
+                            authorUrl = target.url,
+                            source = "Wallhaven",
+                            isNsfw = !target.purity.equals("sfw", true)
+                        )
+                        _todayWallpaper.value = WallpaperUiState.Success(item)
+                        recordWallpaperHistory(item)
+                    } else {
+                        _todayWallpaper.value = WallpaperUiState.Error("No Wallhaven wallpapers found")
+                    }
+                }.onFailure {
+                    _todayWallpaper.value = WallpaperUiState.Error(
+                        it.localizedMessage ?: "Wallhaven API error"
+                    )
                 }
             } else {
                 val query = when (type) {
@@ -904,7 +1261,11 @@ class WallpaperViewModel(application: Application) : AndroidViewModel(applicatio
             try {
                 if (type.startsWith("Nekosia")) {
                     val categoryName = type.removePrefix("Nekosia:")
-                    val result = repository.getNekosiaRandom(category = categoryName, count = 5)
+                    val result = repository.getNekosiaRandom(
+                        category = categoryName,
+                        count = 5,
+                        includeNsfw = _nekosiaNsfwEnabled.value
+                    )
                     result.onSuccess { list ->
                         val currentId = (_todayWallpaper.value as? WallpaperUiState.Success)?.data?.id
                         synchronized(_preloadPool) {
@@ -920,7 +1281,8 @@ class WallpaperViewModel(application: Application) : AndroidViewModel(applicatio
                                             author = res.attribution?.artist?.username ?: "Nekosia Artist",
                                             authorUrl = res.attribution?.artist?.profile,
                                             source = "Nekosia",
-                                            category = categoryName
+                                            category = categoryName,
+                                            isNsfw = res.rating?.equals("safe", true) == false
                                         )
                                     )
                                 }
@@ -935,7 +1297,34 @@ class WallpaperViewModel(application: Application) : AndroidViewModel(applicatio
                         else -> _customQueries[type] ?: "curated"
                     }
 
-                    if (query == "curated") {
+                    if (type.startsWith("Wallhaven")) {
+                        val result = repository.searchWallhaven(
+                            query = query,
+                            page = (1..10).random(),
+                            includeNsfw = _wallhavenNsfwEnabled.value
+                        )
+                        result.onSuccess { response ->
+                            val target = response.data.randomOrNull()
+                            if (target != null) {
+                                val item = UnifiedWallpaper(
+                                    id = "wallhaven_${target.id}",
+                                    imageUrl = target.path,
+                                    thumbnailUrl = target.thumbs.large,
+                                    author = "Wallhaven",
+                                    authorUrl = target.url,
+                                    source = "Wallhaven",
+                                    category = query,
+                                    isNsfw = !target.purity.equals("sfw", true)
+                                )
+                                _todayWallpaper.value = WallpaperUiState.Success(item)
+                                recordWallpaperHistory(item)
+                            } else {
+                                _todayWallpaper.value = WallpaperUiState.Error("No Wallhaven wallpapers found")
+                            }
+                        }.onFailure {
+                            _todayWallpaper.value = WallpaperUiState.Error(it.localizedMessage ?: "Wallhaven API error")
+                        }
+                    } else if (query == "curated") {
                         val result = repository.getPexelsCurated(page = (1..50).random(), count = 80)
                         result.onSuccess { response ->
                             val currentId = (_todayWallpaper.value as? WallpaperUiState.Success)?.data?.id
@@ -995,27 +1384,27 @@ class WallpaperViewModel(application: Application) : AndroidViewModel(applicatio
     }
 
     fun loadCategoryWallpapers(categoryKey: String) {
-        if (!categoryKey.startsWith("nekosia_") && _pexelsApiKey.value.isEmpty()) {
-            performWithApiKeyCheck {
-                loadCategoryWallpapersInternal(categoryKey)
-            }
-        } else {
-            loadCategoryWallpapersInternal(categoryKey)
-        }
+        loadCategoryWallpapersInternal(categoryKey)
     }
 
     private fun loadCategoryWallpapersInternal(categoryKey: String) {
-        viewModelScope.launch {
+        categoryLoadJob?.cancel()
+        categoryLoadJob = viewModelScope.launch {
             _categoryGridState.value = WallpaperUiState.Loading
             // Reset pagination state
             currentCategoryKey = categoryKey
             currentCategoryPage = 1
+            currentCategoryDeviantArtOffset = null
             hasMoreCategoryPages = true
             
             if (categoryKey.startsWith("nekosia_")) {
                 val nekCode = categoryKey.removePrefix("nekosia_")
                 hasMoreCategoryPages = false // Nekosia doesn't support pagination
-                val result = repository.getNekosiaRandom(nekCode, count = 15)
+                val result = repository.getNekosiaRandom(
+                    nekCode,
+                    count = 15,
+                    includeNsfw = _nekosiaNsfwEnabled.value
+                )
                 result.onSuccess { list ->
                     val wallpapers = list.map { res ->
                         UnifiedWallpaper(
@@ -1025,7 +1414,8 @@ class WallpaperViewModel(application: Application) : AndroidViewModel(applicatio
                             author = res.attribution?.artist?.username ?: "Artist",
                             authorUrl = res.attribution?.artist?.profile,
                             source = "Nekosia",
-                            category = nekCode
+                            category = nekCode,
+                            isNsfw = res.rating?.equals("safe", true) == false
                         )
                     }.distinctBy { it.id }
                     _categoryGridState.value = WallpaperUiState.Success(wallpapers)
@@ -1033,35 +1423,20 @@ class WallpaperViewModel(application: Application) : AndroidViewModel(applicatio
                     _categoryGridState.value = WallpaperUiState.Error(it.localizedMessage ?: "Network error")
                 }
             } else {
-                // Pexels Category with pagination support (80 images per page for infinite experience)
-                val queryMap = mapOf(
-                    "nature" to "scenery landscape wallpaper",
-                    "space" to "cosmic galaxy astronomy",
-                    "urban" to "tokyo new york cyberpunk design",
-                    "ocean" to "deep ocean waves blue",
-                    "minimalist" to "clean minimalist backgrounds"
-                )
-                val query = queryMap[categoryKey] ?: _customQueries[categoryKey] ?: categoryKey
-                val pageNum = if (categoryKey.startsWith("custom_pexels_")) 1 else (1..5).random()
+                val query = categoryQuery(categoryKey)
+                // DeviantArt uses a cursor-like offset. Start every new tag at zero so a
+                // previous category's page cannot make the next tag appear empty.
+                val pageNum = 1
                 currentCategoryPage = pageNum
-                // Fetch 80 wallpapers per page (Pexels max per_page is 80)
-                val result = repository.searchPexels(query, page = pageNum, count = 80)
-                result.onSuccess { res ->
-                    val wallpapers = res.photos.map { photo ->
-                        UnifiedWallpaper(
-                            id = "pexels_${photo.id}",
-                            imageUrl = photo.src.original,
-                            thumbnailUrl = photo.src.large,
-                            author = photo.photographer,
-                            authorUrl = photo.photographerUrl,
-                            source = "Pexels"
-                        )
-                    }.distinctBy { it.id }
-                    // If we got fewer than expected or page exceeded max, no more pages
-                    hasMoreCategoryPages = res.photos.size >= 80
-                    _categoryGridState.value = WallpaperUiState.Success(wallpapers)
-                }.onFailure {
-                    _categoryGridState.value = WallpaperUiState.Error(it.localizedMessage ?: "Api error")
+                val page = loadSearchCategoryPage(query, pageNum)
+                if (page.wallpapers.isNotEmpty()) {
+                    currentCategoryDeviantArtOffset = page.deviantArtNextOffset
+                    hasMoreCategoryPages = page.hasMore
+                    _categoryGridState.value = WallpaperUiState.Success(page.wallpapers)
+                } else {
+                    _categoryGridState.value = WallpaperUiState.Error(
+                        page.errorMessage ?: "No configured API returned images."
+                    )
                 }
             }
         }
@@ -1081,7 +1456,11 @@ class WallpaperViewModel(application: Application) : AndroidViewModel(applicatio
         viewModelScope.launch {
             if (categoryKey.startsWith("nekosia_")) {
                 val nekCode = categoryKey.removePrefix("nekosia_")
-                val result = repository.getNekosiaRandom(nekCode, count = 15)
+                val result = repository.getNekosiaRandom(
+                    nekCode,
+                    count = 15,
+                    includeNsfw = _nekosiaNsfwEnabled.value
+                )
                 result.onSuccess { list ->
                     val newWallpapers = list.map { res ->
                         UnifiedWallpaper(
@@ -1091,7 +1470,8 @@ class WallpaperViewModel(application: Application) : AndroidViewModel(applicatio
                             author = res.attribution?.artist?.username ?: "Artist",
                             authorUrl = res.attribution?.artist?.profile,
                             source = "Nekosia",
-                            category = nekCode
+                            category = nekCode,
+                            isNsfw = res.rating?.equals("safe", true) == false
                         )
                     }.distinctBy { it.id }
                     
@@ -1103,38 +1483,24 @@ class WallpaperViewModel(application: Application) : AndroidViewModel(applicatio
                     }
                 }
             } else {
-                val queryMap = mapOf(
-                    "nature" to "scenery landscape wallpaper",
-                    "space" to "cosmic galaxy astronomy",
-                    "urban" to "tokyo new york cyberpunk design",
-                    "ocean" to "deep ocean waves blue",
-                    "minimalist" to "clean minimalist backgrounds"
-                )
-                val query = queryMap[categoryKey] ?: _customQueries[categoryKey] ?: categoryKey
+                val query = categoryQuery(categoryKey)
                 currentCategoryPage++
-                val result = repository.searchPexels(query, page = currentCategoryPage, count = 80)
-                result.onSuccess { res ->
-                    val newWallpapers = res.photos.map { photo ->
-                        UnifiedWallpaper(
-                            id = "pexels_${photo.id}",
-                            imageUrl = photo.src.original,
-                            thumbnailUrl = photo.src.large,
-                            author = photo.photographer,
-                            authorUrl = photo.photographerUrl,
-                            source = "Pexels"
-                        )
-                    }.distinctBy { it.id }
-                    
+                val page = loadSearchCategoryPage(
+                    query,
+                    currentCategoryPage,
+                    deviantArtOffset = currentCategoryDeviantArtOffset
+                )
+                if (page.wallpapers.isNotEmpty()) {
                     val current = (_categoryGridState.value as? WallpaperUiState.Success)?.data ?: emptyList()
                     val existingIds = current.map { it.id }.toSet()
-                    val filteredNew = newWallpapers.filter { it.id !in existingIds }
+                    val filteredNew = page.wallpapers.filter { it.id !in existingIds }
                     if (filteredNew.isNotEmpty()) {
                         _categoryGridState.value = WallpaperUiState.Success(current + filteredNew)
                     }
-                    hasMoreCategoryPages = res.photos.size >= 80
-                }.onFailure {
-                    // Silently fail on load more - don't break the grid
-                    Log.e("WallpaperViewModel", "Failed to load more wallpapers: ${it.message}")
+                    hasMoreCategoryPages = page.hasMore
+                } else {
+                    hasMoreCategoryPages = false
+                    Log.e("WallpaperViewModel", "Failed to load more wallpapers: ${page.errorMessage}")
                 }
             }
             isLoadingMoreCategory = false
@@ -1142,17 +1508,188 @@ class WallpaperViewModel(application: Application) : AndroidViewModel(applicatio
         }
     }
 
+    private data class SearchCategoryPage(
+        val wallpapers: List<UnifiedWallpaper>,
+        val hasMore: Boolean,
+        val deviantArtNextOffset: Int? = null,
+        val errorMessage: String? = null
+    )
+
+    private fun categoryQuery(categoryKey: String): String {
+        val queryMap = mapOf(
+            "nature" to "scenery landscape wallpaper",
+            "space" to "cosmic galaxy astronomy",
+            "urban" to "tokyo new york cyberpunk design",
+            "ocean" to "deep ocean waves blue",
+            "minimalist" to "clean minimalist backgrounds"
+        )
+        return queryMap[categoryKey] ?: _customQueries[categoryKey] ?: categoryKey
+    }
+
+    private fun mapDeviantArtWallpapers(
+        response: btm.m.todaywallpaper.data.model.DeviantArtBrowseResponse?,
+        query: String
+    ): List<UnifiedWallpaper> {
+        return response?.results.orEmpty().mapNotNull { deviation: DeviantArtDeviation ->
+            val highResUrl = deviation.content?.src?.takeIf { it.isNotBlank() }
+                ?: deviation.preview?.src?.takeIf { it.isNotBlank() }
+                ?: deviation.thumbs.firstOrNull { it.src.isNotBlank() }?.src
+            val imageCandidates = buildList {
+                addAll(deviation.thumbs)
+                deviation.preview?.let(::add)
+            }.filter { it.src.isNotBlank() }
+            val preferredPreview = imageCandidates.firstOrNull {
+                it.width in 400..800 && it.height in 400..800
+            } ?: imageCandidates.firstOrNull()
+            val previewUrl = preferredPreview?.src ?: highResUrl
+            if (highResUrl.isNullOrBlank() || previewUrl.isNullOrBlank()) {
+                null
+            } else {
+                UnifiedWallpaper(
+                    id = "deviantart_${deviation.deviationId}",
+                    imageUrl = highResUrl,
+                    thumbnailUrl = previewUrl,
+                    author = deviation.author?.username?.ifBlank { "DeviantArt Artist" },
+                    authorUrl = null,
+                    source = "DeviantArt",
+                    category = query,
+                    isNsfw = deviation.isMature
+                )
+            }
+        }
+    }
+
+    private suspend fun loadSearchCategoryPage(
+        query: String,
+        page: Int,
+        deviantArtOffset: Int? = null
+    ): SearchCategoryPage = coroutineScope {
+        val perSourceCount = 40
+        val pexelsRequest = _pexelsApiKey.value.takeIf { it.isNotBlank() }?.let {
+            async { repository.searchPexels(query, page = page, count = perSourceCount) }
+        }
+        val deviantArtRequest = if (
+            _deviantArtClientId.value.isNotBlank() && _deviantArtClientSecret.value.isNotBlank()
+        ) {
+            async {
+                repository.searchDeviantArt(
+                    query = query,
+                    page = page,
+                    count = 24,
+                    includeNsfw = _deviantArtNsfwEnabled.value,
+                    useTags = true,
+                    offsetOverride = deviantArtOffset
+                )
+            }
+        } else {
+            null
+        }
+        val pixabayRequest = _pixabayApiKey.value.takeIf { it.isNotBlank() }?.let {
+            async { repository.searchPixabay(query, page = page, count = perSourceCount) }
+        }
+        val wallhavenRequest = async {
+            repository.searchWallhaven(
+                query = query,
+                page = page,
+                includeNsfw = _wallhavenNsfwEnabled.value
+            )
+        }
+
+        val pexelsResult = pexelsRequest?.await()
+        val deviantArtResult = deviantArtRequest?.await()
+        val pixabayResult = pixabayRequest?.await()
+        val wallhavenResult = wallhavenRequest.await()
+        val pexels = pexelsResult?.getOrNull()?.photos.orEmpty().map { photo ->
+            UnifiedWallpaper(
+                id = "pexels_${photo.id}",
+                imageUrl = photo.src.original,
+                thumbnailUrl = photo.src.large,
+                author = photo.photographer,
+                authorUrl = photo.photographerUrl,
+                source = "Pexels",
+                category = query
+            )
+        }
+        val deviantArt = mapDeviantArtWallpapers(deviantArtResult?.getOrNull(), query)
+        val pixabay = pixabayResult?.getOrNull()?.hits.orEmpty().map { image ->
+            UnifiedWallpaper(
+                id = "pixabay_${image.id}",
+                imageUrl = image.imageUrl ?: image.fullHdUrl ?: image.largeImageUrl,
+                thumbnailUrl = image.webformatUrl.ifBlank { image.previewUrl },
+                author = image.user,
+                authorUrl = image.pageUrl,
+                source = "Pixabay",
+                category = query
+            )
+        }
+        val wallhaven = wallhavenResult.getOrNull()?.data.orEmpty().map { wallpaper ->
+            UnifiedWallpaper(
+                id = "wallhaven_${wallpaper.id}",
+                imageUrl = wallpaper.path,
+                thumbnailUrl = wallpaper.thumbs.large,
+                author = "Wallhaven",
+                authorUrl = wallpaper.url,
+                source = "Wallhaven",
+                category = query,
+                isNsfw = !wallpaper.purity.equals("sfw", true)
+            )
+        }
+        val mixed = interleaveSources(pexels, deviantArt, pixabay, wallhaven).distinctBy { it.id }
+        val pexelsHasMore = pexelsRequest != null && pexels.size >= perSourceCount
+        val deviantArtHasMore = deviantArtResult?.getOrNull()?.hasMore == true
+        val deviantArtNextOffset = deviantArtResult?.getOrNull()?.nextOffset
+        val pixabayHasMore = pixabayRequest != null && pixabay.size >= perSourceCount
+        val wallhavenHasMore = wallhavenResult.getOrNull()?.meta?.let { meta ->
+            (meta.currentPage ?: page) < (meta.lastPage ?: page)
+        } ?: false
+        val error = listOfNotNull(
+            pexelsResult?.exceptionOrNull()?.localizedMessage,
+            deviantArtResult?.exceptionOrNull()?.localizedMessage,
+            pixabayResult?.exceptionOrNull()?.localizedMessage,
+            wallhavenResult.exceptionOrNull()?.localizedMessage
+        ).joinToString("; ").ifBlank { null }
+        SearchCategoryPage(
+            wallpapers = mixed,
+            hasMore = pexelsHasMore || deviantArtHasMore || pixabayHasMore || wallhavenHasMore,
+            deviantArtNextOffset = deviantArtNextOffset,
+            errorMessage = error
+        )
+    }
+
+    private fun interleaveSources(
+        pexels: List<UnifiedWallpaper>,
+        deviantArt: List<UnifiedWallpaper>,
+        pixabay: List<UnifiedWallpaper>,
+        wallhaven: List<UnifiedWallpaper>
+    ): List<UnifiedWallpaper> {
+        val output = ArrayList<UnifiedWallpaper>(pexels.size + deviantArt.size + pixabay.size + wallhaven.size)
+        val maxSize = maxOf(pexels.size, deviantArt.size, pixabay.size, wallhaven.size)
+        repeat(maxSize) { index ->
+            pexels.getOrNull(index)?.let(output::add)
+            deviantArt.getOrNull(index)?.let(output::add)
+            pixabay.getOrNull(index)?.let(output::add)
+            wallhaven.getOrNull(index)?.let(output::add)
+        }
+        return output
+    }
+
 
     // ==========================================
     // 5. FAVORITING & ALBUM OPERATIONS
     // ==========================================
 
+    private val favoriteStateFlows = mutableMapOf<String, StateFlow<Boolean>>()
+
     fun isWallpaperFavoriteFlow(id: String): StateFlow<Boolean> {
-        return repository.isFavorite(id).stateIn(
-            viewModelScope,
-            SharingStarted.WhileSubscribed(5000),
-            false
-        )
+        return synchronized(favoriteStateFlows) {
+            favoriteStateFlows.getOrPut(id) {
+                repository.isFavorite(id).stateIn(
+                    viewModelScope,
+                    SharingStarted.WhileSubscribed(5000),
+                    false
+                )
+            }
+        }
     }
 
     fun toggleFavorite(wallpaper: UnifiedWallpaper) {
@@ -1176,10 +1713,99 @@ class WallpaperViewModel(application: Application) : AndroidViewModel(applicatio
         }
     }
 
-    fun createNewCollection(name: String, description: String?, onComplete: (Int) -> Unit) {
+    fun recordViewedWallpaper(wallpaper: UnifiedWallpaper) {
         viewModelScope.launch {
-            val id = repository.createCollection(name, description)
+            repository.recordHistory(
+                HistoryWallpaper(
+                    id = wallpaper.id,
+                    imageUrl = wallpaper.imageUrl,
+                    thumbnailUrl = wallpaper.thumbnailUrl.ifBlank { wallpaper.imageUrl },
+                    authorName = wallpaper.author,
+                    authorUrl = wallpaper.authorUrl,
+                    source = wallpaper.source,
+                    category = wallpaper.category
+                )
+            )
+        }
+    }
+
+    fun deleteHistoryWallpaper(id: String) {
+        viewModelScope.launch {
+            repository.deleteHistory(id)
+        }
+    }
+
+    fun createNewCollection(
+        name: String,
+        description: String?,
+        categoryId: Long? = null,
+        onComplete: (Int) -> Unit
+    ) {
+        viewModelScope.launch {
+            val id = repository.createCollection(name, description, categoryId)
             onComplete(id)
+        }
+    }
+
+    fun createAlbumCategory(name: String, onComplete: (Result<AlbumCategory>) -> Unit) {
+        viewModelScope.launch {
+            onComplete(runCatching { repository.createAlbumCategory(name) })
+        }
+    }
+
+    fun createCollectionWithLocalImages(
+        name: String,
+        description: String?,
+        categoryId: Long,
+        imageUris: List<android.net.Uri>,
+        requireImages: Boolean = true,
+        onComplete: (Result<CollectionCreationResult>) -> Unit
+    ) {
+        viewModelScope.launch {
+            val result = runCatching {
+                val context = getApplication<Application>()
+                val collectionId = repository.createCollection(name.trim(), description, categoryId)
+                var importedCount = 0
+
+                imageUris.distinct().forEachIndexed { index, uri ->
+                    val localUrl = copyLocalImageToCollection(context, uri, index) ?: return@forEachIndexed
+                    val imageId = "local_${System.currentTimeMillis()}_$index"
+                    repository.addWallpaperToCollection(
+                        collectionId = collectionId,
+                        itemId = imageId,
+                        imageUrl = localUrl,
+                        thumbnailUrl = localUrl,
+                        authorName = null,
+                        source = "Local Gallery"
+                    )
+                    importedCount++
+                }
+
+                if (requireImages && importedCount == 0) {
+                    repository.deleteCollection(collectionId)
+                    error("No selected image could be imported")
+                }
+                CollectionCreationResult(collectionId, importedCount)
+            }
+            onComplete(result)
+        }
+    }
+
+    private suspend fun copyLocalImageToCollection(
+        context: Context,
+        uri: android.net.Uri,
+        index: Int
+    ): String? = withContext(Dispatchers.IO) {
+        try {
+            val folder = java.io.File(context.filesDir, "local_collections").apply { mkdirs() }
+            val file = java.io.File(folder, "img_local_${System.currentTimeMillis()}_$index.jpg")
+            context.contentResolver.openInputStream(uri)?.use { input ->
+                java.io.FileOutputStream(file).use { output -> input.copyTo(output) }
+            } ?: return@withContext null
+            "file://${file.absolutePath}"
+        } catch (error: Exception) {
+            Log.e("WallpaperViewModel", "Failed to import local image: $uri", error)
+            null
         }
     }
 
@@ -1257,7 +1883,8 @@ class WallpaperViewModel(application: Application) : AndroidViewModel(applicatio
     }
 
     fun fetchActiveCollectionItems(collectionId: Int) {
-        viewModelScope.launch {
+        activeCollectionItemsJob?.cancel()
+        activeCollectionItemsJob = viewModelScope.launch {
             repository.getItemsForCollection(collectionId).collect {
                 _activeCollectionItems.value = it
             }
@@ -1275,7 +1902,7 @@ class WallpaperViewModel(application: Application) : AndroidViewModel(applicatio
     // 6. REAL ANDROID SDK WALLPAPER MANAGER
     // ==========================================
 
-    fun setSystemWallpaper(context: Context, imageUrl: String) {
+    fun setSystemWallpaper(context: Context, imageUrl: String, scope: WallpaperScope = WallpaperScope.BOTH) {
         viewModelScope.launch {
             _wallpaperSettingState.value = SettingWallpaperState.Setting
             val loader = ImageLoader(context)
@@ -1292,7 +1919,18 @@ class WallpaperViewModel(application: Application) : AndroidViewModel(applicatio
                     val wallpaperManager = WallpaperManager.getInstance(context)
                     // Set wallpaper on background Dispatcher as setBitmap is a blocking I/O operation
                     withContext(Dispatchers.IO) {
-                        wallpaperManager.setBitmap(bitmap)
+                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+                            val which = when (scope) {
+                                WallpaperScope.HOME_SCREEN -> WallpaperManager.FLAG_SYSTEM
+                                WallpaperScope.LOCK_SCREEN -> WallpaperManager.FLAG_LOCK
+                                WallpaperScope.BOTH -> WallpaperManager.FLAG_SYSTEM or WallpaperManager.FLAG_LOCK
+                                WallpaperScope.ASK_EVERY_TIME -> WallpaperManager.FLAG_SYSTEM or WallpaperManager.FLAG_LOCK
+                            }
+                            wallpaperManager.setBitmap(bitmap, null, true, which)
+                        } else {
+                            @Suppress("DEPRECATION")
+                            wallpaperManager.setBitmap(bitmap)
+                        }
                     }
                     _wallpaperSettingState.value = SettingWallpaperState.Success
                 } else {
@@ -1328,65 +1966,63 @@ class WallpaperViewModel(application: Application) : AndroidViewModel(applicatio
                 .allowHardware(false)
                 .build()
             try {
-                val result = loader.execute(request)
-                val drawable = result.drawable
-                if (drawable is BitmapDrawable) {
-                    val bitmap = drawable.bitmap
-                    val filename = "wallpaper_${System.currentTimeMillis()}"
-
-                    val success = withContext(Dispatchers.IO) {
-                        try {
-                            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                                val contentValues = android.content.ContentValues().apply {
-                                    put(android.provider.MediaStore.MediaColumns.DISPLAY_NAME, "$filename.jpg")
-                                    put(android.provider.MediaStore.MediaColumns.MIME_TYPE, "image/jpeg")
-                                    put(android.provider.MediaStore.MediaColumns.RELATIVE_PATH, "Pictures/TodayWallpaper")
-                                }
-                                val resolver = context.contentResolver
-                                val uri = resolver.insert(android.provider.MediaStore.Images.Media.EXTERNAL_CONTENT_URI, contentValues)
-                                if (uri != null) {
-                                    resolver.openOutputStream(uri)?.use { out ->
-                                        bitmap.compress(android.graphics.Bitmap.CompressFormat.JPEG, 100, out)
-                                    }
-                                    true
-                                } else {
-                                    false
-                                }
-                            } else {
-                                val dir = android.os.Environment.getExternalStoragePublicDirectory(android.os.Environment.DIRECTORY_PICTURES)
-                                val albumDir = java.io.File(dir, "TodayWallpaper")
-                                if (!albumDir.exists()) {
-                                    albumDir.mkdirs()
-                                }
-                                val file = java.io.File(albumDir, "$filename.jpg")
-                                java.io.FileOutputStream(file).use { out ->
-                                    bitmap.compress(android.graphics.Bitmap.CompressFormat.JPEG, 100, out)
-                                }
-                                android.media.MediaScannerConnection.scanFile(
-                                    context,
-                                    arrayOf(file.absolutePath),
-                                    arrayOf("image/jpeg"),
-                                    null
-                                )
-                                true
-                            }
-                        } catch (e: Exception) {
-                            Log.e("WallpaperViewModel", "Error saving image: ${e.message}", e)
-                            false
-                        }
-                    }
-
-                    if (success) {
-                        _downloadState.value = DownloadState.Success
-                    } else {
-                        _downloadState.value = DownloadState.Error("Failed to save image to gallery")
-                    }
-                } else {
+                val drawable = loader.execute(request).drawable
+                if (drawable !is BitmapDrawable) {
                     _downloadState.value = DownloadState.Error("Failed to decode image drawable")
+                    return@launch
                 }
-            } catch (e: Exception) {
-                Log.e("WallpaperViewModel", "Error downloading wallpaper: ${e.message}", e)
-                _downloadState.value = DownloadState.Error(e.localizedMessage ?: "Failed to download image")
+                val bitmap = drawable.bitmap
+                val filename = "wallpaper_${System.currentTimeMillis()}"
+                val success = withContext(Dispatchers.IO) {
+                    try {
+                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                            val values = android.content.ContentValues().apply {
+                                put(android.provider.MediaStore.MediaColumns.DISPLAY_NAME, "$filename.jpg")
+                                put(android.provider.MediaStore.MediaColumns.MIME_TYPE, "image/jpeg")
+                                put(android.provider.MediaStore.MediaColumns.RELATIVE_PATH, "Pictures/TodayWallpaper")
+                            }
+                            val uri = context.contentResolver.insert(
+                                android.provider.MediaStore.Images.Media.EXTERNAL_CONTENT_URI,
+                                values
+                            ) ?: return@withContext false
+                            context.contentResolver.openOutputStream(uri)?.use { output ->
+                                bitmap.compress(android.graphics.Bitmap.CompressFormat.JPEG, 100, output)
+                            } ?: return@withContext false
+                            true
+                        } else {
+                            val albumDir = java.io.File(
+                                android.os.Environment.getExternalStoragePublicDirectory(
+                                    android.os.Environment.DIRECTORY_PICTURES
+                                ),
+                                "TodayWallpaper"
+                            ).apply { mkdirs() }
+                            val file = java.io.File(albumDir, "$filename.jpg")
+                            java.io.FileOutputStream(file).use { output ->
+                                bitmap.compress(android.graphics.Bitmap.CompressFormat.JPEG, 100, output)
+                            }
+                            android.media.MediaScannerConnection.scanFile(
+                                context,
+                                arrayOf(file.absolutePath),
+                                arrayOf("image/jpeg"),
+                                null
+                            )
+                            true
+                        }
+                    } catch (error: Exception) {
+                        Log.e("WallpaperViewModel", "Error saving image: ${error.message}", error)
+                        false
+                    }
+                }
+                _downloadState.value = if (success) {
+                    DownloadState.Success
+                } else {
+                    DownloadState.Error("Failed to save image to gallery")
+                }
+            } catch (error: Exception) {
+                Log.e("WallpaperViewModel", "Error downloading wallpaper: ${error.message}", error)
+                _downloadState.value = DownloadState.Error(
+                    error.localizedMessage ?: "Failed to download image"
+                )
             }
         }
     }
@@ -1401,7 +2037,7 @@ class WallpaperViewModel(application: Application) : AndroidViewModel(applicatio
     }
 
     // ==========================================
-    // 7. CUSTOM PEXELS CATEGORIES PERSISTENCE
+    // 7. CUSTOM SEARCH CATEGORIES PERSISTENCE
     // ==========================================
 
     private fun loadCustomCategories() {
@@ -1463,7 +2099,7 @@ class WallpaperViewModel(application: Application) : AndroidViewModel(applicatio
     }
 
     fun addCustomCategory(title: String, query: String, desc: String, onResult: (Boolean, String) -> Unit) {
-        if (_pexelsApiKey.value.isEmpty()) {
+        if (_pexelsApiKey.value.isEmpty() && _pixabayApiKey.value.isEmpty()) {
             performWithApiKeyCheck {
                 addCustomCategoryInternal(title, query, desc, onResult)
             }
@@ -1480,14 +2116,9 @@ class WallpaperViewModel(application: Application) : AndroidViewModel(applicatio
         
         viewModelScope.launch {
             _categoryGridState.value = WallpaperUiState.Loading
-            repository.searchPexels(query, page = 1, count = 1).onSuccess { res ->
-                if (res.photos.isEmpty()) {
-                    onResult(false, getTranslation("Pexels 平台上找不到与该关键词匹配的高清美图，请重新输入更常见的英文词汇", "No direct landscape wallpapers found matching this query. Please check your spelling or use a more descriptive term."))
-                    return@onSuccess
-                }
-                
-                val firstPhoto = res.photos.first()
-                val coverUrl = firstPhoto.src.large2x
+            val searchPage = loadSearchCategoryPage(query, page = 1)
+            val coverUrl = searchPage.wallpapers.firstOrNull()?.thumbnailUrl
+            if (coverUrl != null) {
                 val key = "custom_pexels_${System.currentTimeMillis()}"
                 
                 val newItem = CategoryItem(
@@ -1514,15 +2145,21 @@ class WallpaperViewModel(application: Application) : AndroidViewModel(applicatio
                 updateUnifiedCategories()
                 
                 onResult(true, "")
-            }.onFailure { error ->
-                Log.e("WallpaperViewModel", "API check failed for keyword: $query: ${error.message}")
-                onResult(false, getTranslation("检索 Pexels API 发生网络异常，请确认网络环境或更换关键词! (${error.localizedMessage})", "Error querying search API: ${error.localizedMessage}"))
+            } else {
+                Log.e("WallpaperViewModel", "API check failed for keyword $query: ${searchPage.errorMessage}")
+                onResult(
+                    false,
+                    getTranslation(
+                        "分类检索未找到匹配图片，请检查网络、API Key 或更换关键词。",
+                        "Category search returned no images. Check the network, API Keys, or query."
+                    )
+                )
             }
         }
     }
 
     fun addCustomCategories(items: List<Triple<String, String, String>>, onResult: (Int, Int, String) -> Unit) {
-        if (_pexelsApiKey.value.isEmpty()) {
+        if (_pexelsApiKey.value.isEmpty() && _pixabayApiKey.value.isEmpty()) {
             performWithApiKeyCheck {
                 addCustomCategoriesInternal(items, onResult)
             }
@@ -1552,13 +2189,12 @@ class WallpaperViewModel(application: Application) : AndroidViewModel(applicatio
                     return@forEach
                 }
 
-                repository.searchPexels(query, page = 1, count = 1).onSuccess { res ->
-                    if (res.photos.isEmpty()) {
+                val searchPage = loadSearchCategoryPage(query, page = 1)
+                val coverUrl = searchPage.wallpapers.firstOrNull()?.thumbnailUrl
+                if (coverUrl == null) {
                         failedCount++
-                        lastError = getTranslation("Pexels 上找不到关键词: $query", "No photos found on Pexels for keyword: $query")
-                    } else {
-                        val firstPhoto = res.photos.first()
-                        val coverUrl = firstPhoto.src.large2x
+                        lastError = getTranslation("分类检索找不到关键词: $query", "No images found for query: $query")
+                } else {
                         val key = "custom_pexels_${System.currentTimeMillis()}_${(1000..9999).random()}"
 
                         val newItem = CategoryItem(
@@ -1574,10 +2210,6 @@ class WallpaperViewModel(application: Application) : AndroidViewModel(applicatio
                         newQueries[key] = query
                         newCovers[key] = coverUrl
                         successCount++
-                    }
-                }.onFailure { error ->
-                    failedCount++
-                    lastError = error.localizedMessage ?: "Error querying server"
                 }
             }
 

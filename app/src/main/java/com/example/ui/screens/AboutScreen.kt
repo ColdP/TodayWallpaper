@@ -5,17 +5,9 @@ import android.content.Context
 import android.content.Intent
 import android.os.Build
 import androidx.activity.compose.PredictiveBackHandler
-import androidx.compose.animation.AnimatedContent
-import androidx.compose.animation.core.tween
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.fadeOut
-import androidx.compose.animation.slideInVertically
-import androidx.compose.animation.slideOutVertically
-import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -31,10 +23,9 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material.icons.automirrored.filled.OpenInNew
-import androidx.compose.material.icons.filled.Code
-import androidx.compose.material.icons.filled.Update
+import androidx.compose.material.icons.automirrored.rounded.ArrowBack
+import androidx.compose.material.icons.automirrored.rounded.OpenInNew
+import androidx.compose.material.icons.rounded.Code
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.HorizontalDivider
@@ -44,6 +35,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.mutableStateOf
@@ -54,6 +46,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.ContentScale
@@ -63,6 +56,8 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import btm.m.todaywallpaper.ui.viewmodel.WallpaperViewModel
+import btm.m.todaywallpaper.ui.theme.isAppDarkTheme
+import btm.m.todaywallpaper.ui.widget.momentumBackTransform
 import btm.m.todaywallpaper.BuildConfig
 import btm.m.todaywallpaper.R
 import androidx.core.graphics.drawable.toBitmap
@@ -77,21 +72,30 @@ fun AboutScreen(
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
-    var showLicensesPage by remember { mutableStateOf(false) }
+    val aboutScrollState = rememberScrollState()
 
     val view = androidx.compose.ui.platform.LocalView.current
-    val darkTheme = isSystemInDarkTheme()
+    val darkTheme = isAppDarkTheme()
     DisposableEffect(darkTheme) {
         val window = (view.context as? android.app.Activity)?.window
         if (window != null) {
             val insetsController = androidx.core.view.WindowCompat.getInsetsController(window, view)
             insetsController.isAppearanceLightStatusBars = !darkTheme
+            insetsController.isAppearanceLightNavigationBars = !darkTheme
             window.statusBarColor = android.graphics.Color.TRANSPARENT
+            window.navigationBarColor = android.graphics.Color.TRANSPARENT
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                window.isStatusBarContrastEnforced = false
+                window.isNavigationBarContrastEnforced = false
+            }
         }
         onDispose {}
     }
 
+    val predictiveBackEnabled by viewModel.predictiveBackEnabled.collectAsState()
+    val predictiveBackMaxProgress by viewModel.predictiveBackMaxProgress.collectAsState()
     var backProgress by remember { mutableStateOf(0f) }
+    var backDirection by remember { mutableStateOf(1f) }
     var isBackSwiping by remember { mutableStateOf(false) }
 
     LaunchedEffect(Unit) {
@@ -99,11 +103,12 @@ fun AboutScreen(
         isBackSwiping = false
     }
 
-    PredictiveBackHandler { progressFlow ->
+    PredictiveBackHandler(enabled = predictiveBackEnabled) { progressFlow ->
         try {
             isBackSwiping = true
             progressFlow.collect { backEvent ->
-                backProgress = backEvent.progress
+                backProgress = kotlin.math.min(backEvent.progress, predictiveBackMaxProgress / 100f)
+                backDirection = if (backEvent.swipeEdge == androidx.activity.BackEventCompat.EDGE_RIGHT) -1f else 1f
             }
             isBackSwiping = false
             backProgress = 1f
@@ -114,12 +119,13 @@ fun AboutScreen(
         }
     }
 
-    val scale = 1f - (backProgress * 0.08f)
-    val translationXDp = (backProgress * 120).dp
-    val alpha = 1f - (backProgress * 0.2f)
-    val cornerRadius = (backProgress * 24).dp
+    val scale = 1f - (backProgress * 0.12f)
+    val translationXDp = (backProgress * 48f * backDirection).dp
+    val alpha = 1f
+    val cornerRadius = 28.dp * backProgress
 
     val appVersion = "${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE})"
+    val deviceModel = resolveDeviceModelName()
     val deviceRom = resolveDeviceRomLabel()
     val androidVersion = "Android ${Build.VERSION.RELEASE} / SDK ${Build.VERSION.SDK_INT}"
     val year = Calendar.getInstance().get(Calendar.YEAR)
@@ -127,39 +133,17 @@ fun AboutScreen(
         context.packageManager.getApplicationIcon(context.packageName).toBitmap().asImageBitmap()
     }
 
-    AnimatedContent(
-        targetState = showLicensesPage,
-        transitionSpec = {
-            (fadeIn(tween(220)) + slideInVertically(initialOffsetY = { it / 8 }))
-                .togetherWith(fadeOut(tween(180)) + slideOutVertically(targetOffsetY = { it / 8 }))
-        },
-        label = "AboutLicensesTransition"
-    ) { isLicensesPage ->
-        if (isLicensesPage) {
-            OpenSourceLicensesScreen(
-                viewModel = viewModel,
-                onBack = { showLicensesPage = false },
-                modifier = modifier.fillMaxSize()
-            )
-        } else {
-            Box(
-                modifier = modifier
-                    .fillMaxSize()
-                    .background(MaterialTheme.colorScheme.background)
-            ) {
-                Scaffold(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .graphicsLayer(
-                            scaleX = scale,
-                            scaleY = scale,
-                            translationX = with(androidx.compose.ui.platform.LocalDensity.current) { translationXDp.toPx() },
-                            alpha = alpha,
-                            clip = cornerRadius > 0.dp,
-                            shape = RoundedCornerShape(cornerRadius)
-                        ),
-                    containerColor = MaterialTheme.colorScheme.background
-                ) { innerPadding ->
+    Box(
+        modifier = modifier
+            .fillMaxSize()
+            .background(Color.Transparent)
+    ) {
+        Scaffold(
+            modifier = Modifier
+                .fillMaxSize()
+                .momentumBackTransform(backProgress, backDirection),
+            containerColor = MaterialTheme.colorScheme.background
+        ) { innerPadding ->
                     Column(
                         modifier = Modifier
                             .fillMaxSize()
@@ -177,7 +161,7 @@ fun AboutScreen(
                                 modifier = Modifier.size(32.dp)
                             ) {
                                 Icon(
-                                    imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+                                    imageVector = Icons.AutoMirrored.Rounded.ArrowBack,
                                     contentDescription = viewModel.getTranslation("返回", "Back"),
                                     tint = MaterialTheme.colorScheme.onBackground,
                                     modifier = Modifier.size(24.dp)
@@ -196,7 +180,7 @@ fun AboutScreen(
                         Column(
                             modifier = Modifier
                                 .fillMaxSize()
-                                .verticalScroll(rememberScrollState())
+                                .verticalScroll(aboutScrollState)
                                 .padding(horizontal = 16.dp)
                         ) {
                             Spacer(modifier = Modifier.height(12.dp))
@@ -311,7 +295,7 @@ fun AboutScreen(
                                     )
                                     Spacer(modifier = Modifier.height(4.dp))
                                     Text(
-                                        text = Build.MODEL,
+                                        text = deviceModel,
                                         fontSize = 13.sp,
                                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                                         textAlign = TextAlign.Start
@@ -374,13 +358,14 @@ fun AboutScreen(
 
                             Spacer(modifier = Modifier.height(14.dp))
 
-                            // Check for Updates Card
+                            // Open Source Licenses Card
                             Card(
                                 modifier = Modifier
                                     .fillMaxWidth()
                                     .clickable {
-                                        val intent = Intent(context, UpdateActivity::class.java)
-                                        context.startActivity(intent)
+                                        context.startActivity(
+                                            Intent(context, OpenSourceLicensesActivity::class.java)
+                                        )
                                     },
                                 shape = RoundedCornerShape(24.dp),
                                 colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
@@ -392,50 +377,8 @@ fun AboutScreen(
                                     horizontalArrangement = Arrangement.Start,
                                     verticalAlignment = Alignment.CenterVertically
                                 ) {
-                                    Icon(
-                                        imageVector = Icons.Default.Update,
-                                        contentDescription = "Check Update",
-                                        tint = MaterialTheme.colorScheme.primary,
-                                        modifier = Modifier.size(18.dp)
-                                    )
-                                    Spacer(modifier = Modifier.width(12.dp))
-                                    Column(horizontalAlignment = Alignment.Start) {
-                                        Text(
-                                            text = viewModel.getTranslation("软件更新", "Software Update"),
-                                            fontSize = 14.sp,
-                                            fontWeight = FontWeight.Medium,
-                                            color = MaterialTheme.colorScheme.onSurface,
-                                            textAlign = TextAlign.Start
-                                        )
-                                        Text(
-                                            text = viewModel.getTranslation("查看应用更新与版本日志", "View app updates & version changelog"),
-                                            fontSize = 12.sp,
-                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                            textAlign = TextAlign.Start
-                                        )
-                                    }
-                                }
-                            }
-
-                            Spacer(modifier = Modifier.height(14.dp))
-
-                            // Open Source Licenses Card
-                            Card(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .clickable { showLicensesPage = true },
-                                shape = RoundedCornerShape(24.dp),
-                                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
-                            ) {
-                                Row(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .padding(16.dp),
-                                    horizontalArrangement = Arrangement.Start,
-                                    verticalAlignment = Alignment.CenterVertically
-                                ) {
                             Icon(
-                                imageVector = Icons.Default.Code,
+                                imageVector = Icons.Rounded.Code,
                                 contentDescription = viewModel.getTranslation("开源代码声明", "Open Source Licenses"),
                                 tint = MaterialTheme.colorScheme.primary,
                                 modifier = Modifier.size(18.dp)
@@ -472,11 +415,9 @@ fun AboutScreen(
                             Spacer(modifier = Modifier.height(48.dp))
                         }
                     }
-                }
             }
         }
     }
-}
 
 @Composable
 private fun AboutLinkItem(
@@ -494,7 +435,7 @@ private fun AboutLinkItem(
         verticalAlignment = Alignment.CenterVertically
     ) {
         Icon(
-            imageVector = Icons.AutoMirrored.Filled.OpenInNew,
+            imageVector = Icons.AutoMirrored.Rounded.OpenInNew,
             contentDescription = title,
             tint = MaterialTheme.colorScheme.primary,
             modifier = Modifier.size(18.dp)
@@ -526,13 +467,18 @@ private fun openUrl(context: Context, url: String) {
     }
 }
 
+private fun resolveDeviceModelName(): String {
+    return readSystemProperty("ro.product.marketname").ifBlank { Build.MODEL }
+}
+
 private fun resolveDeviceRomLabel(): String {
     val normalized = listOf(Build.BRAND, Build.MANUFACTURER)
         .joinToString(" ")
         .lowercase(Locale.ROOT)
 
     val label = when {
-        normalized.contains("xiaomi") || normalized.contains("redmi") || normalized.contains("poco") -> "HyperOS / MIUI"
+        normalized.contains("xiaomi") || normalized.contains("redmi") || normalized.contains("poco") ->
+            if (readSystemProperty("ro.mi.os.version.code").isBlank()) "MIUI" else "HyperOS"
         normalized.contains("oneplus") -> "OxygenOS"
         normalized.contains("oppo") -> "ColorOS"
         normalized.contains("realme") -> "realme UI"
@@ -559,4 +505,14 @@ private fun resolveDeviceRomLabel(): String {
     }
 
     return "${label}  ·  ${Build.BRAND.ifBlank { Build.MANUFACTURER }}"
+}
+
+private fun readSystemProperty(name: String): String {
+    return try {
+        val systemProperties = Class.forName("android.os.SystemProperties")
+        val getMethod = systemProperties.getMethod("get", String::class.java)
+        (getMethod.invoke(null, name) as? String).orEmpty().trim()
+    } catch (_: Exception) {
+        ""
+    }
 }

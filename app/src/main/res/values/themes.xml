@@ -3,6 +3,17 @@
 
     <style name="Theme.MyApplication" parent="android:Theme.DeviceDefault.NoActionBar" />
 
+    <style name="Theme.MyApplication.Transparent" parent="Theme.MyApplication">
+        <item name="android:windowIsTranslucent">true</item>
+        <item name="android:windowBackground">@android:color/transparent</item>
+        <item name="android:colorBackground">@android:color/transparent</item>
+        <item name="android:backgroundDimEnabled">false</item>
+        <item name="android:windowDisablePreview">true</item>
+        <item name="android:windowNoDisplay">false</item>
+        <item name="android:windowIsFloating">false</item>
+        <item name="android:windowNoTitle">true</item>
+    </style>
+
     <style name="Theme.Splash" parent="Theme.MyApplication">
         <item name="android:windowBackground">@drawable/splash_background</item>
         <item name="android:windowNoTitle">true</item>

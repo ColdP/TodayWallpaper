@@ -13,10 +13,10 @@ android {
 
   defaultConfig {
     applicationId = "btm.m.todaywallpaper"
-    minSdk = 24
+    minSdk = 26
     targetSdk = 36
-    versionCode = 10100
-    versionName = "1.1.0"
+    versionCode = 20000
+    versionName = "2.0.0"
 
     testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
   }
@@ -37,7 +37,7 @@ android {
       val keystorePath = System.getenv("KEYSTORE_PATH") ?: "${rootDir}/my-upload-key.jks"
       storeFile = file(keystorePath)
       storePassword = System.getenv("STORE_PASSWORD")
-      keyAlias = "upload"
+      keyAlias = System.getenv("KEY_ALIAS") ?: "upload"
       keyPassword = System.getenv("KEY_PASSWORD")
     }
     create("debugConfig") {
@@ -65,6 +65,9 @@ android {
   buildFeatures {
     compose = true
     buildConfig = true
+  }
+  androidResources {
+    noCompress += listOf("ttf", "otf")
   }
   testOptions { unitTests { isIncludeAndroidResources = true } }
 }
@@ -97,7 +100,7 @@ dependencies {
   implementation(libs.androidx.compose.ui.graphics)
   implementation(libs.androidx.compose.ui.tooling.preview)
   implementation(libs.androidx.core.ktx)
-  // implementation(libs.androidx.datastore.preferences)
+  implementation(libs.androidx.datastore.preferences)
   implementation(libs.androidx.lifecycle.runtime.compose)
   implementation(libs.androidx.lifecycle.runtime.ktx)
   implementation(libs.androidx.lifecycle.viewmodel.compose)

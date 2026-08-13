@@ -1,6 +1,7 @@
 package btm.m.todaywallpaper.data.model
 
 import androidx.room.Entity
+import androidx.room.Index
 import androidx.room.PrimaryKey
 import com.squareup.moshi.Json
 import com.squareup.moshi.JsonClass
@@ -16,17 +17,37 @@ data class FavoriteWallpaper(
     val thumbnailUrl: String,
     val authorName: String?,
     val authorUrl: String?,
-    val source: String, // "Pexels" or "Nekosia"
+    val source: String, // "Pexels", "Pixabay", "Wallhaven", or "Nekosia"
     val category: String?,
     val savedAt: Long = System.currentTimeMillis()
 )
 
-@Entity(tableName = "wallpaper_collections")
+@Entity(tableName = "history_wallpapers")
+data class HistoryWallpaper(
+    @PrimaryKey val id: String,
+    val imageUrl: String,
+    val thumbnailUrl: String,
+    val authorName: String?,
+    val authorUrl: String?,
+    val source: String,
+    val category: String?,
+    val viewedAt: Long = System.currentTimeMillis()
+)
+
+@Entity(tableName = "album_categories", indices = [Index(value = ["name"], unique = true)])
+data class AlbumCategory(
+    @PrimaryKey(autoGenerate = true) val id: Long = 0,
+    val name: String,
+    val createdAt: Long = System.currentTimeMillis()
+)
+
+@Entity(tableName = "wallpaper_collections", indices = [Index(value = ["categoryId"])])
 data class WallpaperCollection(
     @PrimaryKey(autoGenerate = true) val id: Int = 0,
     val name: String,
     val description: String?,
     val coverUrl: String?, // Image URL of the latest wallpaper in this collection or placeholder
+    val categoryId: Long? = null,
     val createdAt: Long = System.currentTimeMillis()
 )
 
@@ -38,7 +59,7 @@ data class CollectionItem(
     val imageUrl: String,
     val thumbnailUrl: String,
     val authorName: String?,
-    val source: String, // "Pexels" or "Nekosia"
+    val source: String, // "Pexels", "Pixabay", or "Nekosia"
     val addedAt: Long = System.currentTimeMillis()
 )
 
@@ -84,8 +105,112 @@ data class PexelsPhotoSrc(
 
 
 // ==========================================
-// 3. NEKOSIA API MODELS
+// 3. PIXABAY API MODELS
 // ==========================================
+
+@JsonClass(generateAdapter = true)
+data class PixabayResponse(
+    @Json(name = "total") val total: Int,
+    @Json(name = "totalHits") val totalHits: Int,
+    @Json(name = "hits") val hits: List<PixabayImage>
+)
+
+@JsonClass(generateAdapter = true)
+data class PixabayImage(
+    @Json(name = "id") val id: Long,
+    @Json(name = "pageURL") val pageUrl: String,
+    @Json(name = "tags") val tags: String?,
+    @Json(name = "previewURL") val previewUrl: String,
+    @Json(name = "webformatURL") val webformatUrl: String,
+    @Json(name = "largeImageURL") val largeImageUrl: String,
+    @Json(name = "fullHDURL") val fullHdUrl: String?,
+    @Json(name = "imageURL") val imageUrl: String?,
+    @Json(name = "user_id") val userId: Long,
+    @Json(name = "user") val user: String
+)
+
+
+// ==========================================
+// 4. NEKOSIA API MODELS
+// ==========================================
+
+@JsonClass(generateAdapter = true)
+data class WallhavenResponse(
+    @Json(name = "data") val data: List<WallhavenWallpaper>,
+    @Json(name = "meta") val meta: WallhavenMeta?
+)
+
+@JsonClass(generateAdapter = true)
+data class WallhavenWallpaper(
+    @Json(name = "id") val id: String,
+    @Json(name = "url") val url: String?,
+    @Json(name = "purity") val purity: String,
+    @Json(name = "category") val category: String?,
+    @Json(name = "path") val path: String,
+    @Json(name = "thumbs") val thumbs: WallhavenThumbs
+)
+
+@JsonClass(generateAdapter = true)
+data class WallhavenThumbs(
+    @Json(name = "large") val large: String,
+    @Json(name = "original") val original: String?,
+    @Json(name = "small") val small: String?
+)
+
+@JsonClass(generateAdapter = true)
+data class WallhavenMeta(
+    @Json(name = "current_page") val currentPage: Int?,
+    @Json(name = "last_page") val lastPage: Int?,
+    @Json(name = "per_page") val perPage: Int?,
+    @Json(name = "total") val total: Int?
+)
+
+// ==========================================
+// 5. DEVIANTART API MODELS
+// ==========================================
+
+@JsonClass(generateAdapter = true)
+data class DeviantArtAccessTokenResponse(
+    @Json(name = "access_token") val accessToken: String,
+    @Json(name = "expires_in") val expiresIn: Long = 3600
+)
+
+@JsonClass(generateAdapter = true)
+data class DeviantArtBrowseResponse(
+    @Json(name = "results") val results: List<DeviantArtDeviation> = emptyList(),
+    @Json(name = "has_more") val hasMore: Boolean = false,
+    @Json(name = "next_offset") val nextOffset: Int? = null
+)
+
+@JsonClass(generateAdapter = true)
+data class DeviantArtDeviation(
+    @Json(name = "deviationid") val deviationId: String,
+    @Json(name = "title") val title: String = "",
+    @Json(name = "is_mature") val isMature: Boolean = false,
+    @Json(name = "author") val author: DeviantArtAuthor? = null,
+    @Json(name = "preview") val preview: DeviantArtImage? = null,
+    @Json(name = "content") val content: DeviantArtImage? = null,
+    @Json(name = "thumbs") val thumbs: List<DeviantArtImage> = emptyList(),
+    @Json(name = "tags") val tags: List<DeviantArtTag> = emptyList()
+)
+
+@JsonClass(generateAdapter = true)
+data class DeviantArtAuthor(
+    @Json(name = "username") val username: String = "",
+    @Json(name = "usericon") val userIcon: String? = null
+)
+
+@JsonClass(generateAdapter = true)
+data class DeviantArtImage(
+    @Json(name = "src") val src: String = "",
+    @Json(name = "width") val width: Int = 0,
+    @Json(name = "height") val height: Int = 0
+)
+
+@JsonClass(generateAdapter = true)
+data class DeviantArtTag(
+    @Json(name = "name") val tagName: String = ""
+)
 
 @JsonClass(generateAdapter = true)
 data class NekosiaResponse(

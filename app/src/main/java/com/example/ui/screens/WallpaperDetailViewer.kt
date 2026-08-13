@@ -14,14 +14,14 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material.icons.filled.Add
-import androidx.compose.material.icons.filled.CreateNewFolder
-import androidx.compose.material.icons.filled.Favorite
-import androidx.compose.material.icons.filled.FolderSpecial
-import androidx.compose.material.icons.outlined.FavoriteBorder
-import androidx.compose.material.icons.outlined.LibraryAdd
-import androidx.compose.material.icons.outlined.Wallpaper
+import androidx.compose.material.icons.automirrored.rounded.ArrowBack
+import androidx.compose.material.icons.rounded.Add
+import androidx.compose.material.icons.rounded.CreateNewFolder
+import androidx.compose.material.icons.rounded.Favorite
+import androidx.compose.material.icons.rounded.FolderSpecial
+import androidx.compose.material.icons.rounded.FavoriteBorder
+import androidx.compose.material.icons.rounded.LibraryAdd
+import androidx.compose.material.icons.rounded.Wallpaper
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -32,6 +32,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -47,11 +48,13 @@ import android.content.pm.PackageManager
 import androidx.core.content.ContextCompat
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.material.icons.filled.FileDownload
-import androidx.compose.material.icons.filled.Fullscreen
-import androidx.compose.material.icons.filled.FullscreenExit
+import androidx.compose.material.icons.rounded.FileDownload
+import androidx.compose.material.icons.rounded.Fullscreen
+import androidx.compose.material.icons.rounded.FullscreenExit
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.positionInRoot
+import androidx.compose.ui.graphics.toArgb
+import androidx.compose.ui.input.pointer.pointerInteropFilter
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -69,12 +72,22 @@ fun WallpaperDetailViewer(
     onBack: () -> Unit
 ) {
     val context = LocalContext.current
+    val composeRootView = LocalView.current
     val settingState by viewModel.wallpaperSettingState.collectAsState()
     val isFav by viewModel.isWallpaperFavoriteFlow(wallpaperId).collectAsState()
     val collections by viewModel.collections.collectAsState()
     val downloadState by viewModel.downloadState.collectAsState()
     val detailBackProgress by viewModel.detailBackProgress.collectAsState()
+    val detailBackDirection by viewModel.detailBackDirection.collectAsState()
     val isDetailBackSwiping by viewModel.isDetailBackSwiping.collectAsState()
+    val predictiveBackEnabled by viewModel.predictiveBackEnabled.collectAsState()
+    val predictiveBackMaxProgress by viewModel.predictiveBackMaxProgress.collectAsState()
+    val deviceBackCorner = btm.m.todaywallpaper.ui.widget.rememberDeviceCornerRadius()
+    val savedWallpaperScope by viewModel.wallpaperScope.collectAsState()
+
+    // Scope dialog state
+    var showScopeDialog by remember { mutableStateOf(false) }
+    var pendingAlwaysScope by remember { mutableStateOf(false) }
 
     val permissionLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.RequestPermission()
@@ -116,7 +129,6 @@ fun WallpaperDetailViewer(
     }
 
     var showAddToAlbumDialog by remember { mutableStateOf(false) }
-    var showCreateAlbumInline by remember { mutableStateOf(false) }
     val isFullscreen by viewModel.isDetailFullscreen.collectAsState()
 
     val unifiedWallpaper = remember(wallpaperId, imageUrl, authorName, source) {
@@ -143,6 +155,24 @@ fun WallpaperDetailViewer(
     val lgTouchEffect by viewModel.lgTouchEffect.collectAsState()
     val lgRefractionHeightPx = with(density) { lgRefractionHeight.dp.toPx() }
     val lgRefractionOffsetPx = with(density) { lgRefractionOffset.dp.toPx() }
+    val detailFrameStrokePx = with(density) { 1.2.dp.toPx() }
+    val detailFrameStartColor = Color.White.copy(alpha = 0.22f).toArgb()
+    val detailFrameEndColor = Color.White.copy(alpha = 0.05f).toArgb()
+    // These header-control values intentionally do not read the shared Liquid
+    // Glass settings. They define a consistent compact material over every
+    // wallpaper, regardless of the user's action-deck/navigation tuning.
+    val headerGlassBlurRadiusPx = with(density) { 5.6.dp.toPx() }
+    val headerGlassRefractionHeightPx = with(density) { 22.dp.toPx() }
+    val headerGlassRefractionOffsetPx = with(density) { 40.dp.toPx() }
+    val headerGlassTintAlpha = 0.16f
+    val headerGlassDispersion = 0.33f
+    val headerGlassStrokePx = with(density) { 1.dp.toPx() }
+    val headerGlassStrokeStartColor = Color.White.copy(alpha = 0.22f).toArgb()
+    val headerGlassStrokeEndColor = Color.White.copy(alpha = 0.14f).toArgb()
+    // LayoutCoordinates include graphics-layer transforms on this Compose version.
+    // Keep the untransformed deck bounds captured before predictive-back starts;
+    // otherwise each gesture frame would apply translation a second time.
+    var actionDeckBaseBounds by remember { mutableStateOf<androidx.compose.ui.geometry.Rect?>(null) }
 
     if (!renderBackgroundOnly) {
         BackHandler {
@@ -150,11 +180,15 @@ fun WallpaperDetailViewer(
             onBack()
         }
 
-        PredictiveBackHandler { progressFlow ->
+        PredictiveBackHandler(enabled = predictiveBackEnabled) { progressFlow ->
             try {
                 viewModel.setDetailBackGesture(0f, true)
                 progressFlow.collect { backEvent ->
-                    viewModel.setDetailBackGesture(backEvent.progress, true)
+                    viewModel.setDetailBackGesture(
+                        progress = kotlin.math.min(backEvent.progress, predictiveBackMaxProgress / 100f),
+                        swiping = true,
+                        direction = if (backEvent.swipeEdge == androidx.activity.BackEventCompat.EDGE_RIGHT) -1f else 1f
+                    )
                 }
                 viewModel.setDetailBackGesture(1f, false)
                 onBack()
@@ -185,6 +219,13 @@ fun WallpaperDetailViewer(
                     detailGlassView.setDraggableEnabled(lgDraggable)
                     detailGlassView.setElasticEnabled(lgElastic)
                     detailGlassView.setTouchEffectEnabled(lgTouchEffect)
+                    (detailGlassView as? btm.m.todaywallpaper.ui.widget.SafeLiquidGlassView)
+                        ?.configureDetailFrame(
+                            cornerRadius = detailCornerRadiusPx,
+                            strokeWidth = detailFrameStrokePx,
+                            startColor = detailFrameStartColor,
+                            endColor = detailFrameEndColor
+                        )
                     detailGlassView.invalidate()
                 } catch (_: Exception) {}
             }
@@ -208,6 +249,8 @@ fun WallpaperDetailViewer(
             detailGlassView.removeOnLayoutChangeListener(listener)
             detailGlassView.post {
                 try {
+                    (detailGlassView as? btm.m.todaywallpaper.ui.widget.SafeLiquidGlassView)
+                        ?.clearDetailFrame()
                     detailGlassView.layoutParams = android.widget.FrameLayout.LayoutParams(0, 0)
                 } catch (e: Exception) {
                     e.printStackTrace()
@@ -216,29 +259,74 @@ fun WallpaperDetailViewer(
         }
     }
 
+    // The action deck is rendered in a Compose layer that shrinks and translates
+    // during predictive back. Its native glass sibling is outside that layer, so
+    // apply the same transform to its root coordinates explicitly.
+    LaunchedEffect(actionDeckBaseBounds, detailBackProgress, detailBackDirection, isFullscreen) {
+        val bounds = actionDeckBaseBounds ?: return@LaunchedEffect
+        if (detailGlassView == null || renderBackgroundOnly || isFullscreen) return@LaunchedEffect
+        val scale = 1f - detailBackProgress * 0.12f
+        val composeWidth = composeRootView.width.toFloat()
+        val composeHeight = composeRootView.height.toFloat()
+        if (composeWidth <= 0f || composeHeight <= 0f) return@LaunchedEffect
+        val parent = detailGlassView.parent as? android.view.View
+            ?: return@LaunchedEffect
+        val composeLocation = IntArray(2)
+        val parentLocation = IntArray(2)
+        composeRootView.getLocationOnScreen(composeLocation)
+        parent.getLocationOnScreen(parentLocation)
+        val composeOffsetX = (composeLocation[0] - parentLocation[0]).toFloat()
+        val composeOffsetY = (composeLocation[1] - parentLocation[1]).toFloat()
+        val rootWidth = composeWidth
+        val rootHeight = composeHeight
+        val baseLeft = composeOffsetX + bounds.left
+        val baseTop = composeOffsetY + bounds.top
+        val centerX = composeOffsetX + composeWidth / 2f
+        val centerY = composeOffsetY + composeHeight / 2f
+        val translationX = with(density) { (detailBackProgress * 48f * detailBackDirection).dp.toPx() }
+        val translationY = with(density) { (detailBackProgress * 16f).dp.toPx() }
+        val transformedLeft = centerX + (baseLeft - centerX) * scale + translationX
+        val transformedTop = centerY + (baseTop - centerY) * scale + translationY
+        detailGlassView.post {
+            val lp = detailGlassView.layoutParams as? android.widget.FrameLayout.LayoutParams
+                ?: android.widget.FrameLayout.LayoutParams(0, 0)
+            // Keep native layout dimensions fixed. Updating them every gesture
+            // frame triggers LiquidGlassView.rebuild(), which both doubles the
+            // coordinate transform and races its asynchronous shader callback.
+            val baseWidth = bounds.width.toInt().coerceAtLeast(1)
+            val baseHeight = bounds.height.toInt().coerceAtLeast(1)
+            if (lp.width != baseWidth || lp.height != baseHeight) {
+                lp.width = baseWidth
+                lp.height = baseHeight
+                detailGlassView.layoutParams = lp
+            }
+            detailGlassView.pivotX = 0f
+            detailGlassView.pivotY = 0f
+            detailGlassView.translationX = transformedLeft
+            detailGlassView.translationY = transformedTop
+            detailGlassView.scaleX = scale
+            detailGlassView.scaleY = scale
+            detailGlassView.invalidate()
+        }
+    }
+
     DisposableEffect(detailBackGlassView) {
         if (detailBackGlassView == null || renderBackgroundOnly) return@DisposableEffect onDispose {}
         onDispose {
-            detailBackGlassView.post {
-                try {
-                    detailBackGlassView.layoutParams = android.widget.FrameLayout.LayoutParams(0, 0)
-                } catch (e: Exception) {
-                    e.printStackTrace()
-                }
-            }
+            detailBackGlassView.visibility = android.view.View.INVISIBLE
+            detailBackGlassView.layoutParams = android.widget.FrameLayout.LayoutParams(0, 0)
+            (detailBackGlassView as? btm.m.todaywallpaper.ui.widget.SafeLiquidGlassView)
+                ?.clearDetailFrame()
         }
     }
 
     DisposableEffect(detailDownloadGlassView) {
         if (detailDownloadGlassView == null || renderBackgroundOnly) return@DisposableEffect onDispose {}
         onDispose {
-            detailDownloadGlassView.post {
-                try {
-                    detailDownloadGlassView.layoutParams = android.widget.FrameLayout.LayoutParams(0, 0)
-                } catch (e: Exception) {
-                    e.printStackTrace()
-                }
-            }
+            detailDownloadGlassView.visibility = android.view.View.INVISIBLE
+            detailDownloadGlassView.layoutParams = android.widget.FrameLayout.LayoutParams(0, 0)
+            (detailDownloadGlassView as? btm.m.todaywallpaper.ui.widget.SafeLiquidGlassView)
+                ?.clearDetailFrame()
         }
     }
 
@@ -285,12 +373,17 @@ fun WallpaperDetailViewer(
             .fillMaxSize()
             .background(Color.Transparent)
             .graphicsLayer(
-                scaleX = 1f - (detailBackProgress * 0.08f),
-                scaleY = 1f - (detailBackProgress * 0.08f),
-                translationX = with(androidx.compose.ui.platform.LocalDensity.current) { (detailBackProgress * 120).dp.toPx() },
-                alpha = 1f - (detailBackProgress * 0.2f),
+                scaleX = 1f - detailBackProgress * 0.12f,
+                scaleY = 1f - detailBackProgress * 0.12f,
+                translationX = with(androidx.compose.ui.platform.LocalDensity.current) {
+                    (detailBackProgress * 48f * detailBackDirection).dp.toPx()
+                },
+                translationY = with(androidx.compose.ui.platform.LocalDensity.current) {
+                    (detailBackProgress * 16f).dp.toPx()
+                },
+                alpha = 1f,
                 clip = detailBackProgress > 0f,
-                shape = RoundedCornerShape((detailBackProgress * 24).dp)
+                shape = RoundedCornerShape(deviceBackCorner * detailBackProgress)
             )
     ) {
         if (renderBackgroundOnly || (!renderBackgroundOnly && !renderForegroundOnly)) {
@@ -343,13 +436,13 @@ fun WallpaperDetailViewer(
                     modifier = Modifier
                         .size(44.dp)
                         .clip(RoundedCornerShape(percent = 50))
-                        .background(Color.White.copy(alpha = 0.05f)) // Less background to show LiquidGlass clearly
-                        .border(1.dp, Color.White.copy(alpha = 0.22f), RoundedCornerShape(percent = 50))
+                        .forwardTouchToGlass(detailBackGlassView)
                         .onGloballyPositioned { coordinates ->
                             val size = coordinates.size
                             val position = coordinates.positionInRoot()
                             detailBackGlassView?.let { dbg ->
                                 dbg.post {
+                                    dbg.visibility = android.view.View.VISIBLE
                                     val lp = dbg.layoutParams as? android.widget.FrameLayout.LayoutParams
                                     if (lp != null) {
                                         lp.width = size.width
@@ -361,18 +454,31 @@ fun WallpaperDetailViewer(
                                     dbg.translationX = position.x
                                     dbg.translationY = position.y
                                     
-                                    // Style the LiquidGlassView for a circular button
-                                    val buttonCornerRadiusPx = 22f * context.resources.displayMetrics.density
-                                    val blurRadius = 8f * context.resources.displayMetrics.density
+                                    // Fixed, detail-header-only glass configuration.
+                                    // Its frame is native too, so it follows the
+                                    // liquid view during touch deformation.
                                     btm.m.todaywallpaper.MainActivity.safeConfigure(
                                         view = dbg,
                                         red = 1.0f,
                                         green = 1.0f,
                                         blue = 1.0f,
-                                        alpha = 0.15f,
-                                        cornerRadius = buttonCornerRadiusPx,
-                                        blurRadius = blurRadius
+                                        alpha = headerGlassTintAlpha,
+                                        cornerRadius = size.height / 2f,
+                                        blurRadius = headerGlassBlurRadiusPx,
+                                        refractionHeight = headerGlassRefractionHeightPx
                                     )
+                                    dbg.setRefractionOffset(headerGlassRefractionOffsetPx)
+                                    dbg.setDispersion(headerGlassDispersion)
+                                    dbg.setDraggableEnabled(false)
+                                    dbg.setElasticEnabled(false)
+                                    dbg.setTouchEffectEnabled(true)
+                                    (dbg as? btm.m.todaywallpaper.ui.widget.SafeLiquidGlassView)
+                                        ?.configureDetailFrame(
+                                            cornerRadius = size.height / 2f,
+                                            strokeWidth = headerGlassStrokePx,
+                                            startColor = headerGlassStrokeStartColor,
+                                            endColor = headerGlassStrokeEndColor
+                                        )
                                 }
                             }
                         }
@@ -381,7 +487,7 @@ fun WallpaperDetailViewer(
                     contentAlignment = Alignment.Center
                 ) {
                     Icon(
-                        imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+                        imageVector = Icons.AutoMirrored.Rounded.ArrowBack,
                         contentDescription = "Back",
                         tint = Color.White,
                         modifier = Modifier.size(20.dp)
@@ -396,13 +502,13 @@ fun WallpaperDetailViewer(
                 Row(
                     modifier = Modifier
                         .clip(RoundedCornerShape(percent = 50))
-                        .background(Color.White.copy(alpha = 0.05f))
-                        .border(1.dp, Color.White.copy(alpha = 0.22f), RoundedCornerShape(percent = 50))
+                        .forwardTouchToGlass(detailDownloadGlassView)
                         .onGloballyPositioned { coordinates ->
                             val size = coordinates.size
                             val position = coordinates.positionInRoot()
                             detailDownloadGlassView?.let { ddg ->
                                 ddg.post {
+                                    ddg.visibility = android.view.View.VISIBLE
                                     val lp = ddg.layoutParams as? android.widget.FrameLayout.LayoutParams
                                     if (lp != null) {
                                         lp.width = size.width
@@ -413,17 +519,28 @@ fun WallpaperDetailViewer(
                                     }
                                     ddg.translationX = position.x
                                     ddg.translationY = position.y
-                                    val buttonCornerRadiusPx = (size.height / 2).toFloat()
-                                    val blurRadius = 8f * context.resources.displayMetrics.density
                                     btm.m.todaywallpaper.MainActivity.safeConfigure(
                                         view = ddg,
                                         red = 1.0f,
                                         green = 1.0f,
                                         blue = 1.0f,
-                                        alpha = 0.15f,
-                                        cornerRadius = buttonCornerRadiusPx,
-                                        blurRadius = blurRadius
+                                        alpha = headerGlassTintAlpha,
+                                        cornerRadius = size.height / 2f,
+                                        blurRadius = headerGlassBlurRadiusPx,
+                                        refractionHeight = headerGlassRefractionHeightPx
                                     )
+                                    ddg.setRefractionOffset(headerGlassRefractionOffsetPx)
+                                    ddg.setDispersion(headerGlassDispersion)
+                                    ddg.setDraggableEnabled(false)
+                                    ddg.setElasticEnabled(false)
+                                    ddg.setTouchEffectEnabled(true)
+                                    (ddg as? btm.m.todaywallpaper.ui.widget.SafeLiquidGlassView)
+                                        ?.configureDetailFrame(
+                                            cornerRadius = size.height / 2f,
+                                            strokeWidth = headerGlassStrokePx,
+                                            startColor = headerGlassStrokeStartColor,
+                                            endColor = headerGlassStrokeEndColor
+                                        )
                                 }
                             }
                         },
@@ -438,7 +555,7 @@ fun WallpaperDetailViewer(
                         contentAlignment = Alignment.Center
                     ) {
                         Icon(
-                            imageVector = if (isFullscreen) Icons.Default.FullscreenExit else Icons.Default.Fullscreen,
+                            imageVector = if (isFullscreen) Icons.Rounded.FullscreenExit else Icons.Rounded.Fullscreen,
                             contentDescription = "Fullscreen",
                             tint = Color.White,
                             modifier = Modifier.size(20.dp)
@@ -475,7 +592,7 @@ fun WallpaperDetailViewer(
                             )
                         } else {
                             Icon(
-                                imageVector = Icons.Default.FileDownload,
+                                imageVector = Icons.Rounded.FileDownload,
                                 contentDescription = "Download Wallpaper",
                                 tint = Color.White,
                                 modifier = Modifier.size(20.dp)
@@ -491,31 +608,19 @@ fun WallpaperDetailViewer(
                     .fillMaxWidth()
                     .padding(24.dp)
                     .onGloballyPositioned { coordinates ->
-                        if (detailGlassView != null) {
-                            val size = coordinates.size
-                            val position = coordinates.positionInRoot()
-                            detailGlassView.post {
-                                val lp = detailGlassView.layoutParams as? android.widget.FrameLayout.LayoutParams
-                                if (lp != null) {
-                                    lp.width = size.width
-                                    lp.height = size.height
-                                    detailGlassView.layoutParams = lp
-                                } else {
-                                    detailGlassView.layoutParams = android.widget.FrameLayout.LayoutParams(size.width, size.height)
-                                }
-                                detailGlassView.translationX = position.x
-                                detailGlassView.translationY = position.y
-                            }
+                        val position = coordinates.positionInRoot()
+                        val size = coordinates.size
+                        val currentBounds = androidx.compose.ui.geometry.Rect(
+                            left = position.x,
+                            top = position.y,
+                            right = position.x + size.width,
+                            bottom = position.y + size.height
+                        )
+                        if (detailBackProgress == 0f) {
+                            actionDeckBaseBounds = currentBounds
                         }
                     }
                     .clip(RoundedCornerShape(36.dp))
-                    .border(
-                        width = 1.2.dp,
-                        brush = androidx.compose.ui.graphics.Brush.linearGradient(
-                            colors = listOf(Color.White.copy(alpha = 0.22f), Color.White.copy(alpha = 0.05f))
-                        ),
-                        shape = RoundedCornerShape(36.dp)
-                    )
             ) {
                 // Sibling 2 (Top): Foreground layout with clear readable text and buttons
                 Column(
@@ -556,7 +661,7 @@ fun WallpaperDetailViewer(
                                 .testTag("detail_fav_toggle")
                         ) {
                             Icon(
-                                imageVector = if (isFav) Icons.Filled.Favorite else Icons.Outlined.FavoriteBorder,
+                                imageVector = if (isFav) Icons.Rounded.Favorite else Icons.Rounded.FavoriteBorder,
                                 contentDescription = "Favorite",
                                 modifier = Modifier.size(24.dp)
                             )
@@ -624,9 +729,15 @@ fun WallpaperDetailViewer(
                             }
                         }
 
-                        // Apply Wallpaper directly using native manager
+                        // Apply Wallpaper with scope support
                         Button(
-                            onClick = { viewModel.setSystemWallpaper(context, imageUrl) },
+                            onClick = {
+                                if (savedWallpaperScope == WallpaperViewModel.WallpaperScope.ASK_EVERY_TIME) {
+                                    showScopeDialog = true
+                                } else {
+                                    viewModel.setSystemWallpaper(context, imageUrl, savedWallpaperScope)
+                                }
+                            },
                             colors = ButtonDefaults.buttonColors(
                                 containerColor = MaterialTheme.colorScheme.primary,
                                 contentColor = MaterialTheme.colorScheme.onPrimary
@@ -678,7 +789,7 @@ fun WallpaperDetailViewer(
                     contentAlignment = Alignment.Center
                 ) {
                     Icon(
-                        imageVector = Icons.Default.FullscreenExit,
+                        imageVector = Icons.Rounded.FullscreenExit,
                         contentDescription = "Exit Fullscreen",
                         tint = Color.White,
                         modifier = Modifier.size(20.dp)
@@ -719,10 +830,16 @@ fun WallpaperDetailViewer(
                                 )
                                 Spacer(modifier = Modifier.height(12.dp))
                                 TextButton(
-                                    onClick = { showCreateAlbumInline = true }
+                                    onClick = {
+                                        viewModel.showCreateCollectionOverlay(
+                                            sourceWallpaper = unifiedWallpaper,
+                                            requireLocalImages = false
+                                        )
+                                        showAddToAlbumDialog = false
+                                    }
                                 ) {
                                     Icon(
-                                        imageVector = Icons.Filled.CreateNewFolder,
+                                        imageVector = Icons.Rounded.CreateNewFolder,
                                         contentDescription = "New Album",
                                         modifier = Modifier.size(16.dp)
                                     )
@@ -767,7 +884,7 @@ fun WallpaperDetailViewer(
                                         verticalAlignment = Alignment.CenterVertically
                                     ) {
                                         Icon(
-                                            imageVector = Icons.Filled.FolderSpecial,
+                                            imageVector = Icons.Rounded.FolderSpecial,
                                             contentDescription = "Folder",
                                             tint = MaterialTheme.colorScheme.primary,
                                             modifier = Modifier.size(24.dp)
@@ -796,7 +913,13 @@ fun WallpaperDetailViewer(
                                         modifier = Modifier
                                             .fillMaxWidth()
                                             .clip(RoundedCornerShape(10.dp))
-                                            .clickable { showCreateAlbumInline = true }
+                                            .clickable {
+                                                viewModel.showCreateCollectionOverlay(
+                                                    sourceWallpaper = unifiedWallpaper,
+                                                    requireLocalImages = false
+                                                )
+                                                showAddToAlbumDialog = false
+                                            }
                                             .border(
                                                 1.dp,
                                                 MaterialTheme.colorScheme.primary.copy(alpha = 0.3f),
@@ -807,7 +930,7 @@ fun WallpaperDetailViewer(
                                         horizontalArrangement = Arrangement.Center
                                     ) {
                                         Icon(
-                                            imageVector = Icons.Filled.Add,
+                                            imageVector = Icons.Rounded.Add,
                                             contentDescription = "Create inline",
                                             tint = MaterialTheme.colorScheme.primary,
                                             modifier = Modifier.size(16.dp)
@@ -834,26 +957,47 @@ fun WallpaperDetailViewer(
             )
         }
 
-        // Inner nested dialog box to add target album on the fly
-        if (showCreateAlbumInline) {
-            CreateCollectionDialog(
+        // Wallpaper scope selection dialog
+        if (showScopeDialog) {
+            WallpaperScopeDialog(
                 viewModel = viewModel,
-                onDismiss = { showCreateAlbumInline = false },
-                onConfirm = { name, desc, _ ->
-                    viewModel.createNewCollection(name, desc) { id ->
-                        showCreateAlbumInline = false
-                        // Automatically attach to this newly generated album!
-                        viewModel.addWallpaperToCollectionId(id, unifiedWallpaper)
-                        showAddToAlbumDialog = false
-                        Toast.makeText(
-                            context,
-                            viewModel.getTranslation("专属图集已创建并存入图片！", "Album created and image stored!"),
-                            Toast.LENGTH_SHORT
-                        ).show()
-                    }
+                onDismiss = { showScopeDialog = false },
+                onAlways = { scope ->
+                    viewModel.setWallpaperScope(scope)
+                    viewModel.setSystemWallpaper(context, imageUrl, scope)
+                    showScopeDialog = false
+                },
+                onJustOnce = { scope ->
+                    viewModel.setSystemWallpaper(context, imageUrl, scope)
+                    showScopeDialog = false
                 }
             )
         }
+
         } // closing if (renderForegroundOnly || ...)
+    }
+}
+
+/**
+ * Mirrors a Compose control's pointer stream to its native glass sibling.
+ * Returning false deliberately preserves the original Compose click handler;
+ * the native view only receives the gesture to render its touch feedback.
+ */
+private fun Modifier.forwardTouchToGlass(
+    glassView: com.qmdeve.liquidglass.widget.LiquidGlassView?
+): Modifier {
+    if (glassView == null) return this
+    return pointerInteropFilter { event ->
+        val glassEvent = android.view.MotionEvent.obtain(event)
+        try {
+            // Event coordinates are already local to the Compose control and
+            // its native glass sibling has precisely the same bounds.
+            glassView.dispatchTouchEvent(glassEvent)
+        } catch (_: Throwable) {
+            // Header interaction must stay usable if a renderer is recreating.
+        } finally {
+            glassEvent.recycle()
+        }
+        false
     }
 }

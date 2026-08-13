@@ -7,14 +7,13 @@ import androidx.activity.enableEdgeToEdge
 import androidx.activity.viewModels
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.automirrored.rounded.ArrowBack
+import androidx.compose.material.icons.rounded.Check
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -27,7 +26,10 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import btm.m.todaywallpaper.ui.theme.MyApplicationTheme
+import btm.m.todaywallpaper.ui.theme.isAppDarkTheme
 import btm.m.todaywallpaper.ui.viewmodel.WallpaperViewModel
+import btm.m.todaywallpaper.ui.widget.enableMomentumTransparentWindow
+import btm.m.todaywallpaper.ui.widget.momentumBackTransform
 
 class StyleSettingActivity : ComponentActivity() {
 
@@ -35,6 +37,7 @@ class StyleSettingActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        enableMomentumTransparentWindow()
         enableEdgeToEdge()
 
         setContent {
@@ -59,7 +62,7 @@ fun StyleSettingScreen(
     val currentLang by viewModel.language.collectAsState()
 
     val view = androidx.compose.ui.platform.LocalView.current
-    val darkTheme = isSystemInDarkTheme()
+    val darkTheme = isAppDarkTheme()
     DisposableEffect(darkTheme) {
         val window = (view.context as? android.app.Activity)?.window
         if (window != null) {
@@ -70,7 +73,10 @@ fun StyleSettingScreen(
         onDispose {}
     }
 
+    val predictiveBackEnabled by viewModel.predictiveBackEnabled.collectAsState()
+    val predictiveBackMaxProgress by viewModel.predictiveBackMaxProgress.collectAsState()
     var backProgress by remember { mutableStateOf(0f) }
+    var backDirection by remember { mutableStateOf(1f) }
     var isBackSwiping by remember { mutableStateOf(false) }
 
     LaunchedEffect(Unit) {
@@ -78,11 +84,12 @@ fun StyleSettingScreen(
         isBackSwiping = false
     }
 
-    androidx.activity.compose.PredictiveBackHandler { progressFlow ->
+    androidx.activity.compose.PredictiveBackHandler(enabled = predictiveBackEnabled) { progressFlow ->
         try {
             isBackSwiping = true
             progressFlow.collect { backEvent ->
-                backProgress = backEvent.progress
+                backProgress = kotlin.math.min(backEvent.progress, predictiveBackMaxProgress / 100f)
+                backDirection = if (backEvent.swipeEdge == androidx.activity.BackEventCompat.EDGE_RIGHT) -1f else 1f
             }
             isBackSwiping = false
             backProgress = 1f
@@ -99,6 +106,7 @@ fun StyleSettingScreen(
             "PexelsSpace" to ("Pexels 浩瀚太空星际" to "Pexels Galactic Space"),
             "PexelsMinimalist" to ("Pexels 优雅留白极简" to "Pexels Minimal Art"),
             "PexelsNature" to ("Pexels 壮丽山川自然" to "Pexels Natural Planet"),
+            "Wallhaven" to ("Wallhaven 综合精选" to "Wallhaven Collection"),
             "Nekosia:cute" to ("Nekosia 萌系治愈二次元" to "Nekosia Kawaii Cute"),
             "Nekosia:girl" to ("Nekosia 唯美二次元少女" to "Nekosia Beauty Girl"),
             "Nekosia:maid" to ("Nekosia 黑白经典女仆" to "Nekosia Classic Maid"),
@@ -106,27 +114,20 @@ fun StyleSettingScreen(
         )
     }
 
-    val scale = 1f - (backProgress * 0.08f)
-    val translationXDp = (backProgress * 120).dp
-    val alpha = 1f - (backProgress * 0.2f)
-    val cornerRadius = (backProgress * 24).dp
+    val scale = 1f - (backProgress * 0.12f)
+    val translationXDp = (backProgress * 48f * backDirection).dp
+    val alpha = 1f
+    val cornerRadius = 28.dp * backProgress
 
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .background(MaterialTheme.colorScheme.background)
+            .background(Color.Transparent)
     ) {
         Scaffold(
             modifier = Modifier
                 .fillMaxSize()
-                .graphicsLayer(
-                    scaleX = scale,
-                    scaleY = scale,
-                    translationX = with(androidx.compose.ui.platform.LocalDensity.current) { translationXDp.toPx() },
-                    alpha = alpha,
-                    clip = cornerRadius > 0.dp,
-                    shape = RoundedCornerShape(cornerRadius)
-                ),
+                .momentumBackTransform(backProgress, backDirection),
             containerColor = MaterialTheme.colorScheme.background
         ) { innerPadding ->
             Column(
@@ -146,7 +147,7 @@ fun StyleSettingScreen(
                         modifier = Modifier.size(32.dp)
                     ) {
                         Icon(
-                            imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+                            imageVector = Icons.AutoMirrored.Rounded.ArrowBack,
                             contentDescription = "Back",
                             tint = MaterialTheme.colorScheme.onBackground,
                             modifier = Modifier.size(24.dp)
@@ -181,7 +182,7 @@ fun StyleSettingScreen(
                                 .fillMaxWidth()
                                 .padding(vertical = 8.dp)
                         ) {
-                            basicOptions.forEachIndexed { index, (key, titlePair) ->
+                            basicOptions.forEach { (key, titlePair) ->
                                 val title = if (currentLang == "zh") titlePair.first else titlePair.second
                                 StyleRowItem(
                                     title = title,
@@ -191,12 +192,6 @@ fun StyleSettingScreen(
                                             btm.m.todaywallpaper.ui.viewmodel.WallpaperViewModel.mainViewModelInstance?.setHomeWallpaperType(key)
                                     }
                                 )
-                                if (index < basicOptions.lastIndex) {
-                                    HorizontalDivider(
-                                        modifier = Modifier.padding(horizontal = 16.dp),
-                                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.08f)
-                                    )
-                                }
                             }
                         }
                     }
@@ -237,7 +232,7 @@ fun StyleSettingScreen(
                                         .padding(vertical = 24.dp)
                                 )
                             } else {
-                                customItems.forEachIndexed { index, item ->
+                                customItems.forEach { item ->
                                     val name = if (currentLang == "zh") item.zhTitle else item.enTitle
                                     StyleRowItem(
                                         title = name,
@@ -247,12 +242,6 @@ fun StyleSettingScreen(
                                             btm.m.todaywallpaper.ui.viewmodel.WallpaperViewModel.mainViewModelInstance?.setHomeWallpaperType(item.key)
                                         }
                                     )
-                                    if (index < customItems.lastIndex) {
-                                        HorizontalDivider(
-                                            modifier = Modifier.padding(horizontal = 16.dp),
-                                            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.08f)
-                                        )
-                                    }
                                 }
                             }
                         }
@@ -292,7 +281,7 @@ fun StyleSettingScreen(
                                         .padding(vertical = 24.dp)
                                 )
                             } else {
-                                collections.forEachIndexed { index, item ->
+                                collections.forEach { item ->
                                     StyleRowItem(
                                         title = item.name,
                                         isSelected = homeType == "collection_${item.id}",
@@ -301,12 +290,6 @@ fun StyleSettingScreen(
                                             btm.m.todaywallpaper.ui.viewmodel.WallpaperViewModel.mainViewModelInstance?.setHomeWallpaperType("collection_${item.id}")
                                         }
                                     )
-                                    if (index < collections.lastIndex) {
-                                        HorizontalDivider(
-                                            modifier = Modifier.padding(horizontal = 16.dp),
-                                            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.08f)
-                                        )
-                                    }
                                 }
                             }
                         }
@@ -341,9 +324,9 @@ fun StyleRowItem(
         )
         if (isSelected) {
             Icon(
-                imageVector = Icons.Default.Check,
+                imageVector = Icons.Rounded.Check,
                 contentDescription = "Selected",
-                tint = Color(0xFF007AFF),
+                tint = MaterialTheme.colorScheme.primary,
                 modifier = Modifier.size(18.dp)
             )
         }

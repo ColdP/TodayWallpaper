@@ -1,8 +1,5 @@
 package btm.m.todaywallpaper.ui.screens
 
-import androidx.compose.ui.viewinterop.AndroidView
-import androidx.compose.ui.platform.LocalDensity
-import btm.m.todaywallpaper.MainActivity
 import android.widget.Toast
 import androidx.compose.animation.*
 import androidx.compose.animation.core.tween
@@ -13,10 +10,10 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.*
-import androidx.compose.material.icons.outlined.FavoriteBorder
-import androidx.compose.material.icons.outlined.Refresh
-import androidx.compose.material.icons.outlined.Wallpaper
+import androidx.compose.material.icons.rounded.*
+import androidx.compose.material.icons.rounded.FavoriteBorder
+import androidx.compose.material.icons.rounded.Refresh
+import androidx.compose.material.icons.rounded.Wallpaper
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -33,8 +30,6 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
-import androidx.compose.ui.layout.onGloballyPositioned
-import androidx.compose.ui.layout.positionInRoot
 import btm.m.todaywallpaper.ui.viewmodel.WallpaperUiState
 import btm.m.todaywallpaper.ui.viewmodel.WallpaperViewModel
 import java.text.SimpleDateFormat
@@ -51,27 +46,12 @@ import androidx.compose.ui.input.pointer.PointerEventPass
 fun HomeScreen(
     viewModel: WallpaperViewModel,
     onViewDetail: (String, String, String?, String) -> Unit,
-    homeRefreshGlassView: com.qmdeve.liquidglass.widget.LiquidGlassView? = null,
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
     val todayState by viewModel.todayWallpaper.collectAsState()
     val settingState by viewModel.wallpaperSettingState.collectAsState()
     val gestureEnabled by viewModel.homeGestureEnabled.collectAsState()
-    val hasPrevious by viewModel.hasPreviousWallpaper.collectAsState()
-    val hasNext by viewModel.hasNextWallpaper.collectAsState()
-
-    DisposableEffect(homeRefreshGlassView) {
-        onDispose {
-            homeRefreshGlassView?.post {
-                try {
-                    homeRefreshGlassView.layoutParams = android.widget.FrameLayout.LayoutParams(0, 0)
-                } catch (e: Exception) {
-                    e.printStackTrace()
-                }
-            }
-        }
-    }
 
     // Handle Toast outcomes for setting wallpapers
     LaunchedEffect(settingState) {
@@ -134,17 +114,18 @@ fun HomeScreen(
                     )
                 }
  
-                // Light tint overlay so that widgets always stand out cleanly
+                // Keep only a subtle top fade for the title. The previous
+                // lower stops added a heavy black gradient behind the bottom
+                // navigation, which obscured the wallpaper and glass effect.
                 Box(
                     modifier = Modifier
                         .fillMaxSize()
                         .background(
                             Brush.verticalGradient(
-                                colors = listOf(
-                                    Color.Black.copy(alpha = 0.45f),
-                                    Color.Transparent,
-                                    Color.Black.copy(alpha = 0.35f),
-                                    Color.Black.copy(alpha = 0.8f)
+                                colorStops = arrayOf(
+                                    0f to Color.Black.copy(alpha = 0.45f),
+                                    0.28f to Color.Transparent,
+                                    1f to Color.Transparent
                                 )
                             )
                         )
@@ -232,113 +213,6 @@ fun HomeScreen(
                             )
                         }
  
-                        // Capsule with Refresh | Prev | Next buttons
-                        Row(
-                            modifier = Modifier
-                                .clip(RoundedCornerShape(50))
-                                .background(Color.White.copy(alpha = 0.08f))
-                                .border(1.dp, Color.White.copy(alpha = 0.22f), RoundedCornerShape(50))
-                                .padding(horizontal = 4.dp, vertical = 4.dp)
-                                .onGloballyPositioned { coordinates ->
-                                    val size = coordinates.size
-                                    val position = coordinates.positionInRoot()
-                                    homeRefreshGlassView?.let { hg ->
-                                        hg.post {
-                                            val lp = hg.layoutParams as? android.widget.FrameLayout.LayoutParams
-                                            if (lp != null) {
-                                                lp.width = size.width
-                                                lp.height = size.height
-                                                hg.layoutParams = lp
-                                            } else {
-                                                hg.layoutParams = android.widget.FrameLayout.LayoutParams(size.width, size.height)
-                                            }
-                                            hg.translationX = position.x
-                                            hg.translationY = position.y
-                                            
-                                            val buttonCornerRadiusPx = 22f * context.resources.displayMetrics.density
-                                            val blurRadius = 8f * context.resources.displayMetrics.density
-                                            btm.m.todaywallpaper.MainActivity.safeConfigure(
-                                                view = hg,
-                                                red = 1.0f,
-                                                green = 1.0f,
-                                                blue = 1.0f,
-                                                alpha = 0.15f,
-                                                cornerRadius = buttonCornerRadiusPx,
-                                                blurRadius = blurRadius,
-                                                refractionHeight = 10f
-                                            )
-                                        }
-                                    }
-                                },
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            // Refresh button
-                            Box(
-                                modifier = Modifier
-                                    .size(36.dp)
-                                    .clip(RoundedCornerShape(50))
-                                    .clickable { viewModel.fetchTodayWallpaper() }
-                                    .testTag("home_refresh_btn"),
-                                contentAlignment = Alignment.Center
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Outlined.Refresh,
-                                    contentDescription = "Refresh",
-                                    tint = Color.White,
-                                    modifier = Modifier.size(20.dp)
-                                )
-                            }
-                            // Divider between Refresh and Prev
-                            Box(
-                                modifier = Modifier
-                                    .width(1.dp)
-                                    .height(20.dp)
-                                    .background(Color.White.copy(alpha = 0.2f))
-                            )
-                            // Previous button
-                            Box(
-                                modifier = Modifier
-                                    .size(36.dp)
-                                    .clip(RoundedCornerShape(50))
-                                    .clickable(enabled = hasPrevious) {
-                                        viewModel.goToPreviousWallpaper()
-                                    }
-                                    .testTag("home_prev_btn"),
-                                contentAlignment = Alignment.Center
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Filled.SkipPrevious,
-                                    contentDescription = "Previous",
-                                    tint = if (hasPrevious) Color.White else Color.White.copy(alpha = 0.3f),
-                                    modifier = Modifier.size(20.dp)
-                                )
-                            }
-                            // Divider between Prev and Next
-                            Box(
-                                modifier = Modifier
-                                    .width(1.dp)
-                                    .height(20.dp)
-                                    .background(Color.White.copy(alpha = 0.2f))
-                            )
-                            // Next button
-                            Box(
-                                modifier = Modifier
-                                    .size(36.dp)
-                                    .clip(RoundedCornerShape(50))
-                                    .clickable {
-                                        viewModel.goToNextWallpaper()
-                                    }
-                                    .testTag("home_next_btn"),
-                                contentAlignment = Alignment.Center
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Filled.SkipNext,
-                                    contentDescription = "Next",
-                                    tint = Color.White,
-                                    modifier = Modifier.size(20.dp)
-                                )
-                            }
-                        }
                     }
  
                     // Middle-Left Date info floating beautifully
@@ -424,7 +298,7 @@ fun HomeScreen(
                     horizontalAlignment = Alignment.CenterHorizontally
                 ) {
                     Icon(
-                        imageVector = Icons.Filled.ErrorOutline,
+                        imageVector = Icons.Rounded.ErrorOutline,
                         contentDescription = "Error",
                         tint = Color.LightGray,
                         modifier = Modifier.size(64.dp)

@@ -89,6 +89,7 @@ Release signing requires the following environment variables:
 |---|---|
 | `KEYSTORE_PATH` | Absolute path to your `.jks` keystore |
 | `STORE_PASSWORD` | Keystore password |
+| `KEY_ALIAS` | Signing key alias (defaults to `upload`) |
 | `KEY_PASSWORD` | Key password |
 
 ---

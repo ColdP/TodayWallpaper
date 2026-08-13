@@ -14,18 +14,17 @@ import androidx.activity.enableEdgeToEdge
 import androidx.activity.viewModels
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material.icons.filled.AccessTime
-import androidx.compose.material.icons.filled.Check
-import androidx.compose.material.icons.filled.Schedule
-import androidx.compose.material.icons.filled.Timer
-import androidx.compose.material.icons.filled.Wallpaper
+import androidx.compose.material.icons.automirrored.rounded.ArrowBack
+import androidx.compose.material.icons.rounded.AccessTime
+import androidx.compose.material.icons.rounded.Check
+import androidx.compose.material.icons.rounded.Schedule
+import androidx.compose.material.icons.rounded.Timer
+import androidx.compose.material.icons.rounded.Wallpaper
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -39,7 +38,10 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import btm.m.todaywallpaper.ui.theme.MyApplicationTheme
+import btm.m.todaywallpaper.ui.theme.isAppDarkTheme
 import btm.m.todaywallpaper.ui.viewmodel.WallpaperViewModel
+import btm.m.todaywallpaper.ui.widget.enableMomentumTransparentWindow
+import btm.m.todaywallpaper.ui.widget.momentumBackTransform
 import java.util.Calendar
 
 class AutoSwitchWallpaperActivity : ComponentActivity() {
@@ -48,6 +50,7 @@ class AutoSwitchWallpaperActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        enableMomentumTransparentWindow()
         enableEdgeToEdge()
 
         setContent {
@@ -169,7 +172,7 @@ fun AutoSwitchWallpaperScreen(
 
     // Status bar styling
     val view = androidx.compose.ui.platform.LocalView.current
-    val darkTheme = isSystemInDarkTheme()
+    val darkTheme = isAppDarkTheme()
     DisposableEffect(darkTheme) {
         val window = (view.context as? android.app.Activity)?.window
         if (window != null) {
@@ -181,7 +184,10 @@ fun AutoSwitchWallpaperScreen(
     }
 
     // Predictive back gesture
+    val predictiveBackEnabled by viewModel.predictiveBackEnabled.collectAsState()
+    val predictiveBackMaxProgress by viewModel.predictiveBackMaxProgress.collectAsState()
     var backProgress by remember { mutableStateOf(0f) }
+    var backDirection by remember { mutableStateOf(1f) }
     var isBackSwiping by remember { mutableStateOf(false) }
 
     LaunchedEffect(Unit) {
@@ -189,11 +195,12 @@ fun AutoSwitchWallpaperScreen(
         isBackSwiping = false
     }
 
-    androidx.activity.compose.PredictiveBackHandler { progressFlow ->
+    androidx.activity.compose.PredictiveBackHandler(enabled = predictiveBackEnabled) { progressFlow ->
         try {
             isBackSwiping = true
             progressFlow.collect { backEvent ->
-                backProgress = backEvent.progress
+                backProgress = kotlin.math.min(backEvent.progress, predictiveBackMaxProgress / 100f)
+                backDirection = if (backEvent.swipeEdge == androidx.activity.BackEventCompat.EDGE_RIGHT) -1f else 1f
             }
             isBackSwiping = false
             backProgress = 1f
@@ -204,10 +211,10 @@ fun AutoSwitchWallpaperScreen(
         }
     }
 
-    val scale = 1f - (backProgress * 0.08f)
-    val translationXDp = (backProgress * 120).dp
-    val alpha = 1f - (backProgress * 0.2f)
-    val cornerRadius = (backProgress * 24).dp
+    val scale = 1f - (backProgress * 0.12f)
+    val translationXDp = (backProgress * 48f * backDirection).dp
+    val alpha = 1f
+    val cornerRadius = 28.dp * backProgress
 
     // Built-in options (same as StyleSettingActivity)
     val basicOptions = remember {
@@ -226,19 +233,12 @@ fun AutoSwitchWallpaperScreen(
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .background(MaterialTheme.colorScheme.background)
+            .background(Color.Transparent)
     ) {
         Scaffold(
             modifier = Modifier
                 .fillMaxSize()
-                .graphicsLayer(
-                    scaleX = scale,
-                    scaleY = scale,
-                    translationX = with(androidx.compose.ui.platform.LocalDensity.current) { translationXDp.toPx() },
-                    alpha = alpha,
-                    clip = cornerRadius > 0.dp,
-                    shape = RoundedCornerShape(cornerRadius)
-                ),
+                .momentumBackTransform(backProgress, backDirection),
             containerColor = MaterialTheme.colorScheme.background
         ) { innerPadding ->
             Column(
@@ -258,7 +258,7 @@ fun AutoSwitchWallpaperScreen(
                         modifier = Modifier.size(32.dp)
                     ) {
                         Icon(
-                            imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+                            imageVector = Icons.AutoMirrored.Rounded.ArrowBack,
                             contentDescription = "Back",
                             tint = MaterialTheme.colorScheme.onBackground,
                             modifier = Modifier.size(24.dp)
@@ -340,7 +340,7 @@ fun AutoSwitchWallpaperScreen(
                         ) {
                             Row(verticalAlignment = Alignment.CenterVertically) {
                                 Icon(
-                                    imageVector = Icons.Default.Wallpaper,
+                                    imageVector = Icons.Rounded.Wallpaper,
                                     contentDescription = "Auto Switch",
                                     tint = MaterialTheme.colorScheme.primary,
                                     modifier = Modifier.size(22.dp)
@@ -376,7 +376,14 @@ fun AutoSwitchWallpaperScreen(
                                         savePreferences()
                                         cancelAutoSwitch()
                                     }
-                                }
+                                },
+                                colors = SwitchDefaults.colors(
+                                    checkedThumbColor = MaterialTheme.colorScheme.onPrimary,
+                                    checkedTrackColor = MaterialTheme.colorScheme.primary,
+                                    uncheckedThumbColor = MaterialTheme.colorScheme.onSurface,
+                                    uncheckedTrackColor = MaterialTheme.colorScheme.surfaceVariant,
+                                    uncheckedBorderColor = MaterialTheme.colorScheme.outline
+                                )
                             )
                         }
                     }
@@ -420,7 +427,7 @@ fun AutoSwitchWallpaperScreen(
                                 ) {
                                     Row(verticalAlignment = Alignment.CenterVertically) {
                                         Icon(
-                                            imageVector = Icons.Default.Timer,
+                                            imageVector = Icons.Rounded.Timer,
                                             contentDescription = "Interval",
                                             tint = if (switchMode == "interval") MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
                                             modifier = Modifier.size(20.dp)
@@ -442,18 +449,13 @@ fun AutoSwitchWallpaperScreen(
                                     }
                                     if (switchMode == "interval") {
                                         Icon(
-                                            imageVector = Icons.Default.Check,
+                                            imageVector = Icons.Rounded.Check,
                                             contentDescription = "Selected",
-                                            tint = Color(0xFF007AFF),
+                                            tint = MaterialTheme.colorScheme.primary,
                                             modifier = Modifier.size(18.dp)
                                         )
                                     }
                                 }
-
-                                HorizontalDivider(
-                                    modifier = Modifier.padding(horizontal = 16.dp),
-                                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.08f)
-                                )
 
                                 // Daily mode
                                 Row(
@@ -470,7 +472,7 @@ fun AutoSwitchWallpaperScreen(
                                 ) {
                                     Row(verticalAlignment = Alignment.CenterVertically) {
                                         Icon(
-                                            imageVector = Icons.Default.Schedule,
+                                            imageVector = Icons.Rounded.Schedule,
                                             contentDescription = "Daily",
                                             tint = if (switchMode == "daily") MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
                                             modifier = Modifier.size(20.dp)
@@ -492,9 +494,9 @@ fun AutoSwitchWallpaperScreen(
                                     }
                                     if (switchMode == "daily") {
                                         Icon(
-                                            imageVector = Icons.Default.Check,
+                                            imageVector = Icons.Rounded.Check,
                                             contentDescription = "Selected",
-                                            tint = Color(0xFF007AFF),
+                                            tint = MaterialTheme.colorScheme.primary,
                                             modifier = Modifier.size(18.dp)
                                         )
                                     }
@@ -738,7 +740,7 @@ fun AutoSwitchWallpaperScreen(
                                         }
                                         Row(verticalAlignment = Alignment.CenterVertically) {
                                             Icon(
-                                                imageVector = Icons.Default.AccessTime,
+                                                imageVector = Icons.Rounded.AccessTime,
                                                 contentDescription = "Time",
                                                 tint = MaterialTheme.colorScheme.primary,
                                                 modifier = Modifier.size(20.dp)
@@ -815,7 +817,7 @@ fun AutoSwitchWallpaperScreen(
                                     .fillMaxWidth()
                                     .padding(vertical = 8.dp)
                             ) {
-                                basicOptions.forEachIndexed { index, (key, titlePair) ->
+                                basicOptions.forEach { (key, titlePair) ->
                                     val title = if (currentLang == "zh") titlePair.first else titlePair.second
                                     StyleRowItem(
                                         title = title,
@@ -826,12 +828,6 @@ fun AutoSwitchWallpaperScreen(
                                             if (autoSwitchEnabled) scheduleAutoSwitch()
                                         }
                                     )
-                                    if (index < basicOptions.lastIndex) {
-                                        HorizontalDivider(
-                                            modifier = Modifier.padding(horizontal = 16.dp),
-                                            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.08f)
-                                        )
-                                    }
                                 }
                             }
                         }
@@ -871,7 +867,7 @@ fun AutoSwitchWallpaperScreen(
                                             .padding(vertical = 24.dp)
                                     )
                                 } else {
-                                    customItems.forEachIndexed { index, item ->
+                                    customItems.forEach { item ->
                                         val name = if (currentLang == "zh") item.zhTitle else item.enTitle
                                         StyleRowItem(
                                             title = name,
@@ -882,12 +878,6 @@ fun AutoSwitchWallpaperScreen(
                                                 if (autoSwitchEnabled) scheduleAutoSwitch()
                                             }
                                         )
-                                        if (index < customItems.lastIndex) {
-                                            HorizontalDivider(
-                                                modifier = Modifier.padding(horizontal = 16.dp),
-                                                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.08f)
-                                            )
-                                        }
                                     }
                                 }
                             }
@@ -927,7 +917,7 @@ fun AutoSwitchWallpaperScreen(
                                             .padding(vertical = 24.dp)
                                     )
                                 } else {
-                                    collections.forEachIndexed { index, item ->
+                                    collections.forEach { item ->
                                         StyleRowItem(
                                             title = item.name,
                                             isSelected = selectedSourceType == "collection_${item.id}",
@@ -937,12 +927,6 @@ fun AutoSwitchWallpaperScreen(
                                                 if (autoSwitchEnabled) scheduleAutoSwitch()
                                             }
                                         )
-                                        if (index < collections.lastIndex) {
-                                            HorizontalDivider(
-                                                modifier = Modifier.padding(horizontal = 16.dp),
-                                                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.08f)
-                                            )
-                                        }
                                     }
                                 }
                             }

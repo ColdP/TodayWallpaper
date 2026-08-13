@@ -19,14 +19,13 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
-import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material.icons.filled.*
+import androidx.compose.material.icons.automirrored.rounded.ArrowBack
+import androidx.compose.material.icons.rounded.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -51,7 +50,9 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
 import btm.m.todaywallpaper.ui.theme.MyApplicationTheme
+import btm.m.todaywallpaper.ui.theme.isAppDarkTheme
 import btm.m.todaywallpaper.ui.viewmodel.WallpaperViewModel
+import btm.m.todaywallpaper.ui.widget.enableMomentumTransparentWindow
 import kotlin.math.roundToInt
 
 class LiquidGlassSettingActivity : ComponentActivity() {
@@ -82,6 +83,7 @@ class LiquidGlassSettingActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        enableMomentumTransparentWindow()
         enableEdgeToEdge()
         viewModel.loadPresets(this)
 
@@ -154,7 +156,7 @@ fun LiquidGlassSettingScreen(
     val touchEffect by viewModel.lgTouchEffect.collectAsState()
     val presets by viewModel.presets.collectAsState()
     val activePresetName by viewModel.activePresetName.collectAsState()
-    val isDark = isSystemInDarkTheme()
+    val isDark = isAppDarkTheme()
 
     // Management mode state
     var isManageMode by remember { mutableStateOf(false) }
@@ -195,11 +197,15 @@ fun LiquidGlassSettingScreen(
         onDispose {}
     }
 
+    val predictiveBackEnabled by viewModel.predictiveBackEnabled.collectAsState()
+    val predictiveBackMaxProgress by viewModel.predictiveBackMaxProgress.collectAsState()
     var backProgress by remember { mutableStateOf(0f) }
-    androidx.activity.compose.PredictiveBackHandler { progressFlow ->
+    var backDirection by remember { mutableStateOf(1f) }
+    androidx.activity.compose.PredictiveBackHandler(enabled = predictiveBackEnabled) { progressFlow ->
         try {
             progressFlow.collect { backEvent ->
-                backProgress = backEvent.progress
+                backProgress = kotlin.math.min(backEvent.progress, predictiveBackMaxProgress / 100f)
+                backDirection = if (backEvent.swipeEdge == androidx.activity.BackEventCompat.EDGE_RIGHT) -1f else 1f
             }
             backProgress = 1f
             onBack()
@@ -208,10 +214,10 @@ fun LiquidGlassSettingScreen(
         }
     }
 
-    val scale = 1f - (backProgress * 0.08f)
-    val translationXDp = (backProgress * 120).dp
-    val alphaVal = 1f - (backProgress * 0.2f)
-    val cornerRadius = (backProgress * 24).dp
+    val scale = 1f - (backProgress * 0.12f)
+    val translationXDp = (backProgress * 48f * backDirection).dp
+    val alphaVal = 1f
+    val cornerRadius = 28.dp * backProgress
     val density = LocalDensity.current
 
     val cornerRadiusPx = with(density) { 299.dp.toPx() }
@@ -393,7 +399,8 @@ fun LiquidGlassSettingScreen(
             .graphicsLayer(
                 scaleX = scale,
                 scaleY = scale,
-                translationX = with(density) { translationXDp.toPx() },
+                translationX = with(androidx.compose.ui.platform.LocalDensity.current) { translationXDp.toPx() },
+                            translationY = with(androidx.compose.ui.platform.LocalDensity.current) { (backProgress * 16f).dp.toPx() },
                 alpha = alphaVal,
                 clip = cornerRadius > 0.dp,
                 shape = RoundedCornerShape(cornerRadius)
@@ -409,7 +416,7 @@ fun LiquidGlassSettingScreen(
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 IconButton(onClick = onBack, modifier = Modifier.size(32.dp)) {
-                    Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back",
+                    Icon(Icons.AutoMirrored.Rounded.ArrowBack, "Back",
                         tint = MaterialTheme.colorScheme.onBackground, modifier = Modifier.size(24.dp))
                 }
                 Spacer(Modifier.width(16.dp))
@@ -659,7 +666,7 @@ fun LiquidGlassSettingScreen(
                             .padding(horizontal = 14.dp, vertical = 6.dp)
                     ) {
                         Icon(
-                            Icons.Default.Delete,
+                            Icons.Rounded.Delete,
                             contentDescription = "Delete",
                             tint = if (selectedForDelete.isNotEmpty()) MaterialTheme.colorScheme.error
                             else MaterialTheme.colorScheme.onSurface.copy(0.3f),
@@ -687,7 +694,7 @@ fun LiquidGlassSettingScreen(
                             .padding(horizontal = 14.dp, vertical = 6.dp)
                     ) {
                         Icon(
-                            Icons.Default.Cancel,
+                            Icons.Rounded.Cancel,
                             contentDescription = "Cancel",
                             tint = MaterialTheme.colorScheme.onSurface.copy(0.7f),
                             modifier = Modifier.size(20.dp)
@@ -729,13 +736,14 @@ private fun PresetCard(
 ) {
     var isExpanded by remember { mutableStateOf(false) }
 
-    Card(
+    Surface(
         modifier = Modifier
             .fillMaxWidth()
             .padding(horizontal = 20.dp),
         shape = RoundedCornerShape(24.dp),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
+        color = MaterialTheme.colorScheme.background,
+        shadowElevation = 0.dp,
+        tonalElevation = 0.dp
     ) {
         Column(modifier = Modifier.fillMaxWidth()) {
             // Header
@@ -766,17 +774,12 @@ private fun PresetCard(
                     )
                 }
                 Icon(
-                    imageVector = if (isExpanded) Icons.Default.KeyboardArrowUp else Icons.Default.KeyboardArrowDown,
+                    imageVector = if (isExpanded) Icons.Rounded.KeyboardArrowUp else Icons.Rounded.KeyboardArrowDown,
                     contentDescription = "Expand",
                     tint = MaterialTheme.colorScheme.onSurface.copy(0.5f),
                     modifier = Modifier.size(24.dp)
                 )
             }
-
-            HorizontalDivider(
-                modifier = Modifier.padding(horizontal = 20.dp),
-                color = Color.Black.copy(alpha = 0.06f)
-            )
 
             // Action buttons row
             Row(
@@ -786,22 +789,22 @@ private fun PresetCard(
                 horizontalArrangement = Arrangement.SpaceEvenly
             ) {
                 PresetActionButton(
-                    icon = Icons.Default.Save,
+                    icon = Icons.Rounded.Save,
                     label = if (currentLang == "zh") "保存预设" else "Save Preset",
                     onClick = onSave
                 )
                 PresetActionButton(
-                    icon = Icons.Default.FileUpload,
+                    icon = Icons.Rounded.FileUpload,
                     label = if (currentLang == "zh") "导入预设" else "Import",
                     onClick = onImport
                 )
                 PresetActionButton(
-                    icon = Icons.Default.FileDownload,
+                    icon = Icons.Rounded.FileDownload,
                     label = if (currentLang == "zh") "导出预设" else "Export",
                     onClick = onExport
                 )
                 PresetActionButton(
-                    icon = Icons.Default.AppRegistration,
+                    icon = Icons.Rounded.AppRegistration,
                     label = if (currentLang == "zh") "管理预设" else "Manage",
                     onClick = {
                         if (isManageMode) {
@@ -822,11 +825,6 @@ private fun PresetCard(
                 exit = shrinkVertically()
             ) {
                 Column(modifier = Modifier.fillMaxWidth()) {
-                    HorizontalDivider(
-                        modifier = Modifier.padding(horizontal = 20.dp),
-                        color = Color.Black.copy(alpha = 0.06f)
-                    )
-
                     if (presets.isEmpty()) {
                         Text(
                             text = if (currentLang == "zh") "暂无预设，请先保存" else "No presets yet.",
@@ -836,7 +834,7 @@ private fun PresetCard(
                             modifier = Modifier.fillMaxWidth().padding(vertical = 20.dp)
                         )
                     } else {
-                        presets.forEachIndexed { index, preset ->
+                        presets.forEach { preset ->
                             if (isManageMode) {
                                 // Management mode: checkbox rows
                                 Row(
@@ -894,12 +892,6 @@ private fun PresetCard(
                                     onDelete = { onSwipeDelete(preset.name) }
                                 )
                             }
-                            if (index < presets.lastIndex) {
-                                HorizontalDivider(
-                                    modifier = Modifier.padding(horizontal = if (isManageMode) 16.dp else 20.dp),
-                                    color = Color.Black.copy(alpha = 0.04f)
-                                )
-                            }
                         }
                     }
 
@@ -950,7 +942,7 @@ private fun SwipeablePresetRow(
                 contentAlignment = Alignment.Center
             ) {
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    Icon(Icons.Default.CheckCircle, "Apply", tint = Color.White, modifier = Modifier.size(22.dp))
+                    Icon(Icons.Rounded.CheckCircle, "Apply", tint = Color.White, modifier = Modifier.size(22.dp))
                     Spacer(Modifier.height(2.dp))
                     Text(if (currentLang == "zh") "应用" else "Apply", color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.Medium)
                 }
@@ -966,7 +958,7 @@ private fun SwipeablePresetRow(
                     contentAlignment = Alignment.Center
                 ) {
                     Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                        Icon(Icons.Default.Delete, "Delete", tint = Color.White, modifier = Modifier.size(22.dp))
+                        Icon(Icons.Rounded.Delete, "Delete", tint = Color.White, modifier = Modifier.size(22.dp))
                         Spacer(Modifier.height(2.dp))
                         Text(if (currentLang == "zh") "删除" else "Delete", color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.Medium)
                     }
@@ -974,8 +966,8 @@ private fun SwipeablePresetRow(
             }
         }
 
-        // Foreground card
-        Card(
+        // Foreground surface (no shadow, no background contrast)
+        Surface(
             modifier = Modifier
                 .fillMaxWidth()
                 .offset { IntOffset(animatedOffsetX.roundToInt(), 0) }
@@ -991,10 +983,9 @@ private fun SwipeablePresetRow(
                     )
                 },
             shape = RoundedCornerShape(16.dp),
-            colors = CardDefaults.cardColors(
-                containerColor = MaterialTheme.colorScheme.surface
-            ),
-            elevation = CardDefaults.cardElevation(defaultElevation = 1.dp)
+            color = MaterialTheme.colorScheme.background,
+            shadowElevation = 0.dp,
+            tonalElevation = 0.dp
         ) {
             Row(
                 modifier = Modifier
@@ -1033,7 +1024,7 @@ private fun SwipeablePresetRow(
                     )
                 }
                 if (isActive) {
-                    Icon(Icons.Default.Check, "Selected", tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(20.dp))
+                    Icon(Icons.Rounded.Check, "Selected", tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(20.dp))
                 }
             }
         }
@@ -1164,7 +1155,7 @@ private fun ImportPresetDialog(
                     onClick = { onPickFile { content -> onImport(content) } },
                     modifier = Modifier.align(Alignment.End)
                 ) {
-                    Icon(Icons.Default.FolderOpen, null, modifier = Modifier.size(18.dp))
+                    Icon(Icons.Rounded.FolderOpen, null, modifier = Modifier.size(18.dp))
                     Spacer(Modifier.width(4.dp))
                     Text(if (currentLang == "zh") "从文件导入" else "Import from file")
                 }
@@ -1237,7 +1228,6 @@ private fun ExportPresetDialog(
                         Text(if (currentLang == "zh") "全选" else "Select All",
                             fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
                     }
-                    HorizontalDivider(color = Color.Black.copy(0.06f))
                     presets.forEach { preset ->
                         Row(
                             modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(8.dp))
@@ -1311,7 +1301,7 @@ private fun SliderCard(
                 colors = SliderDefaults.colors(
                     thumbColor = MaterialTheme.colorScheme.primary,
                     activeTrackColor = MaterialTheme.colorScheme.primary,
-                    inactiveTrackColor = MaterialTheme.colorScheme.primary.copy(0.15f)
+                    inactiveTrackColor = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.22f)
                 )
             )
             Text(description, fontSize = 11.sp,

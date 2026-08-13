@@ -15,7 +15,6 @@ import androidx.activity.viewModels
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
@@ -23,13 +22,13 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material.icons.filled.Check
-import androidx.compose.material.icons.filled.Image
-import androidx.compose.material.icons.filled.Landscape
-import androidx.compose.material.icons.filled.PhoneAndroid
-import androidx.compose.material.icons.filled.Shuffle
-import androidx.compose.material.icons.filled.Upload
+import androidx.compose.material.icons.automirrored.rounded.ArrowBack
+import androidx.compose.material.icons.rounded.Check
+import androidx.compose.material.icons.rounded.Image
+import androidx.compose.material.icons.rounded.Landscape
+import androidx.compose.material.icons.rounded.PhoneAndroid
+import androidx.compose.material.icons.rounded.Shuffle
+import androidx.compose.material.icons.rounded.Upload
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -47,7 +46,9 @@ import coil.compose.AsyncImage
 import btm.m.todaywallpaper.data.model.FavoriteWallpaper
 import btm.m.todaywallpaper.data.model.WallpaperCollection
 import btm.m.todaywallpaper.ui.theme.MyApplicationTheme
+import btm.m.todaywallpaper.ui.theme.isAppDarkTheme
 import btm.m.todaywallpaper.ui.viewmodel.WallpaperViewModel
+import btm.m.todaywallpaper.ui.widget.enableMomentumTransparentWindow
 
 class SplashSettingActivity : ComponentActivity() {
 
@@ -55,6 +56,7 @@ class SplashSettingActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        enableMomentumTransparentWindow()
         enableEdgeToEdge()
 
         setContent {
@@ -147,7 +149,7 @@ fun SplashSettingScreen(
 
     // Status bar styling
     val view = androidx.compose.ui.platform.LocalView.current
-    val darkTheme = isSystemInDarkTheme()
+    val darkTheme = isAppDarkTheme()
     DisposableEffect(darkTheme) {
         val window = (view.context as? Activity)?.window
         if (window != null) {
@@ -159,7 +161,10 @@ fun SplashSettingScreen(
     }
 
     // Predictive back gesture
+    val predictiveBackEnabled by viewModel.predictiveBackEnabled.collectAsState()
+    val predictiveBackMaxProgress by viewModel.predictiveBackMaxProgress.collectAsState()
     var backProgress by remember { mutableStateOf(0f) }
+    var backDirection by remember { mutableStateOf(1f) }
     var isBackSwiping by remember { mutableStateOf(false) }
 
     LaunchedEffect(Unit) {
@@ -167,11 +172,12 @@ fun SplashSettingScreen(
         isBackSwiping = false
     }
 
-    androidx.activity.compose.PredictiveBackHandler { progressFlow ->
+    androidx.activity.compose.PredictiveBackHandler(enabled = predictiveBackEnabled) { progressFlow ->
         try {
             isBackSwiping = true
             progressFlow.collect { backEvent ->
-                backProgress = backEvent.progress
+                backProgress = kotlin.math.min(backEvent.progress, predictiveBackMaxProgress / 100f)
+                backDirection = if (backEvent.swipeEdge == androidx.activity.BackEventCompat.EDGE_RIGHT) -1f else 1f
             }
             isBackSwiping = false
             backProgress = 1f
@@ -182,10 +188,10 @@ fun SplashSettingScreen(
         }
     }
 
-    val scale = 1f - (backProgress * 0.08f)
-    val translationXDp = (backProgress * 120).dp
-    val alpha = 1f - (backProgress * 0.2f)
-    val cornerRadius = (backProgress * 24).dp
+    val scale = 1f - (backProgress * 0.12f)
+    val translationXDp = (backProgress * 48f * backDirection).dp
+    val alpha = 1f
+    val cornerRadius = 28.dp * backProgress
 
     // Built-in options (same as StyleSettingActivity)
     val basicOptions = remember {
@@ -225,7 +231,7 @@ fun SplashSettingScreen(
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .background(MaterialTheme.colorScheme.background)
+            .background(Color.Transparent)
     ) {
         Scaffold(
             modifier = Modifier
@@ -234,6 +240,7 @@ fun SplashSettingScreen(
                     scaleX = scale,
                     scaleY = scale,
                     translationX = with(androidx.compose.ui.platform.LocalDensity.current) { translationXDp.toPx() },
+                            translationY = with(androidx.compose.ui.platform.LocalDensity.current) { (backProgress * 16f).dp.toPx() },
                     alpha = alpha,
                     clip = cornerRadius > 0.dp,
                     shape = RoundedCornerShape(cornerRadius)
@@ -257,7 +264,7 @@ fun SplashSettingScreen(
                         modifier = Modifier.size(32.dp)
                     ) {
                         Icon(
-                            imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+                            imageVector = Icons.AutoMirrored.Rounded.ArrowBack,
                             contentDescription = "Back",
                             tint = MaterialTheme.colorScheme.onBackground,
                             modifier = Modifier.size(24.dp)
@@ -301,7 +308,7 @@ fun SplashSettingScreen(
                         ) {
                             // 1. App Icon (default)
                             SplashModeRow(
-                                icon = Icons.Default.PhoneAndroid,
+                                icon = Icons.Rounded.PhoneAndroid,
                                 title = viewModel.getTranslation("应用图标（默认）", "App Icon (Default)"),
                                 subtitle = viewModel.getTranslation("显示应用启动图标", "Show app launch icon"),
                                 isSelected = splashMode == "app_icon",
@@ -311,14 +318,9 @@ fun SplashSettingScreen(
                                 }
                             )
 
-                            HorizontalDivider(
-                                modifier = Modifier.padding(horizontal = 16.dp),
-                                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.08f)
-                            )
-
                             // 2. Select specific image
                             SplashModeRow(
-                                icon = Icons.Default.Image,
+                                icon = Icons.Rounded.Image,
                                 title = viewModel.getTranslation("选择开屏图", "Select Splash Image"),
                                 subtitle = viewModel.getTranslation("从喜欢/分类/图集中选择一张", "Pick one from favorites/categories/collections"),
                                 isSelected = splashMode == "select",
@@ -328,14 +330,9 @@ fun SplashSettingScreen(
                                 }
                             )
 
-                            HorizontalDivider(
-                                modifier = Modifier.padding(horizontal = 16.dp),
-                                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.08f)
-                            )
-
                             // 3. Random from source
                             SplashModeRow(
-                                icon = Icons.Default.Shuffle,
+                                icon = Icons.Rounded.Shuffle,
                                 title = viewModel.getTranslation("随机开屏图", "Random Splash Image"),
                                 subtitle = viewModel.getTranslation("每次启动随机展示一张", "Show a random image each launch"),
                                 isSelected = splashMode == "random",
@@ -345,14 +342,9 @@ fun SplashSettingScreen(
                                 }
                             )
 
-                            HorizontalDivider(
-                                modifier = Modifier.padding(horizontal = 16.dp),
-                                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.08f)
-                            )
-
                             // 4. Upload
                             SplashModeRow(
-                                icon = Icons.Default.Upload,
+                                icon = Icons.Rounded.Upload,
                                 title = viewModel.getTranslation("上传开屏图", "Upload Splash Image"),
                                 subtitle = viewModel.getTranslation("从相册选择自定义图片", "Choose an image from gallery"),
                                 isSelected = splashMode == "upload",
@@ -447,12 +439,6 @@ fun SplashSettingScreen(
                                             savePreferences()
                                         }
                                     )
-                                    if (index < builtinCategories.lastIndex) {
-                                        HorizontalDivider(
-                                            modifier = Modifier.padding(horizontal = 16.dp),
-                                            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.08f)
-                                        )
-                                    }
                                 }
                             }
                         }
@@ -495,12 +481,6 @@ fun SplashSettingScreen(
                                                 savePreferences()
                                             }
                                         )
-                                        if (index < customItems.lastIndex) {
-                                            HorizontalDivider(
-                                                modifier = Modifier.padding(horizontal = 16.dp),
-                                                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.08f)
-                                            )
-                                        }
                                     }
                                 }
                             }
@@ -552,12 +532,6 @@ fun SplashSettingScreen(
                                                 savePreferences()
                                             }
                                         )
-                                        if (index < collections.lastIndex) {
-                                            HorizontalDivider(
-                                                modifier = Modifier.padding(horizontal = 16.dp),
-                                                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.08f)
-                                            )
-                                        }
                                     }
                                 }
                             }
@@ -596,13 +570,13 @@ fun SplashSettingScreen(
                                                 .padding(8.dp)
                                                 .size(32.dp)
                                                 .background(
-                                                    Color(0xFF007AFF),
+                                                    MaterialTheme.colorScheme.primary,
                                                     RoundedCornerShape(16.dp)
                                                 ),
                                             contentAlignment = Alignment.Center
                                         ) {
                                             Icon(
-                                                imageVector = Icons.Default.Check,
+                                                imageVector = Icons.Rounded.Check,
                                                 contentDescription = "Selected",
                                                 tint = Color.White,
                                                 modifier = Modifier.size(18.dp)
@@ -636,7 +610,7 @@ fun SplashSettingScreen(
                                 )
                             ) {
                                 Icon(
-                                    imageVector = Icons.Default.Landscape,
+                                    imageVector = Icons.Rounded.Landscape,
                                     contentDescription = null,
                                     modifier = Modifier.size(18.dp)
                                 )
@@ -684,7 +658,7 @@ fun SplashSettingScreen(
                             )
                         ) {
                             Icon(
-                                imageVector = Icons.Default.Upload,
+                                imageVector = Icons.Rounded.Upload,
                                 contentDescription = null,
                                 modifier = Modifier.size(18.dp)
                             )
@@ -725,7 +699,7 @@ fun SplashSettingScreen(
                             ) {
                                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
                                     Icon(
-                                        imageVector = Icons.Default.PhoneAndroid,
+                                        imageVector = Icons.Rounded.PhoneAndroid,
                                         contentDescription = null,
                                         tint = Color.White,
                                         modifier = Modifier.size(64.dp)
@@ -811,9 +785,9 @@ fun SplashSettingScreen(
                                         }
                                         if (selectedImageId == fav.id) {
                                             Icon(
-                                                imageVector = Icons.Default.Check,
+                                                imageVector = Icons.Rounded.Check,
                                                 contentDescription = "Selected",
-                                                tint = Color(0xFF007AFF),
+                                                tint = Color.White,
                                                 modifier = Modifier.size(20.dp)
                                             )
                                         }
@@ -866,9 +840,9 @@ fun SplashSettingScreen(
                                         }
                                         if (selectedImageId == item.wallpaperId) {
                                             Icon(
-                                                imageVector = Icons.Default.Check,
+                                                imageVector = Icons.Rounded.Check,
                                                 contentDescription = "Selected",
-                                                tint = Color(0xFF007AFF),
+                                            tint = MaterialTheme.colorScheme.primary,
                                                 modifier = Modifier.size(20.dp)
                                             )
                                         }
@@ -944,9 +918,9 @@ private fun SplashModeRow(
         }
         if (isSelected) {
             Icon(
-                imageVector = Icons.Default.Check,
+                imageVector = Icons.Rounded.Check,
                 contentDescription = "Selected",
-                tint = Color(0xFF007AFF),
+                tint = MaterialTheme.colorScheme.primary,
                 modifier = Modifier.size(18.dp)
             )
         }

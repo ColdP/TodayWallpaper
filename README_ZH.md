@@ -89,6 +89,7 @@ Release 签名需要以下环境变量：
 |---|---|
 | `KEYSTORE_PATH` | `.jks` 签名文件的绝对路径 |
 | `STORE_PASSWORD` | Keystore 密码 |
+| `KEY_ALIAS` | 签名密钥别名（默认值为 `upload`） |
 | `KEY_PASSWORD` | Key 密码 |
 
 ---

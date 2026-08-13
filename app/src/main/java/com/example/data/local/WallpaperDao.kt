@@ -4,8 +4,10 @@ import androidx.room.Dao
 import androidx.room.Insert
 import androidx.room.OnConflictStrategy
 import androidx.room.Query
+import btm.m.todaywallpaper.data.model.AlbumCategory
 import btm.m.todaywallpaper.data.model.CollectionItem
 import btm.m.todaywallpaper.data.model.FavoriteWallpaper
+import btm.m.todaywallpaper.data.model.HistoryWallpaper
 import btm.m.todaywallpaper.data.model.WallpaperCollection
 import kotlinx.coroutines.flow.Flow
 
@@ -31,9 +33,22 @@ interface WallpaperDao {
     @Query("DELETE FROM favorite_wallpapers WHERE id = :id")
     suspend fun deleteFavoriteById(id: String)
 
+    // ==========================================
+    // 2. VIEWING HISTORY
+    // ==========================================
+
+    @Query("SELECT * FROM history_wallpapers ORDER BY viewedAt DESC LIMIT 50")
+    fun getRecentHistory(): Flow<List<HistoryWallpaper>>
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertHistory(history: HistoryWallpaper)
+
+    @Query("DELETE FROM history_wallpapers WHERE id = :id")
+    suspend fun deleteHistoryById(id: String)
+
 
     // ==========================================
-    // 2. WALLPAPER COLLECTIONS
+    // 3. WALLPAPER COLLECTIONS
     // ==========================================
 
     @Query("SELECT * FROM wallpaper_collections ORDER BY createdAt DESC")
@@ -51,9 +66,24 @@ interface WallpaperDao {
     @Query("DELETE FROM wallpaper_collections WHERE id = :collectionId")
     suspend fun deleteCollectionById(collectionId: Int)
 
+    @Query("SELECT * FROM album_categories ORDER BY createdAt ASC, id ASC")
+    fun getAllAlbumCategories(): Flow<List<AlbumCategory>>
+
+    @Query("SELECT * FROM album_categories WHERE name = :name COLLATE NOCASE LIMIT 1")
+    suspend fun getAlbumCategoryByName(name: String): AlbumCategory?
+
+    @Insert(onConflict = OnConflictStrategy.IGNORE)
+    suspend fun insertAlbumCategory(category: AlbumCategory): Long
+
+    @Query("UPDATE wallpaper_collections SET categoryId = :defaultCategoryId WHERE categoryId IN (SELECT id FROM album_categories WHERE name IN (:names))")
+    suspend fun moveCollectionsToCategory(defaultCategoryId: Long, names: List<String>)
+
+    @Query("DELETE FROM album_categories WHERE name IN (:names)")
+    suspend fun deleteAlbumCategoriesByNames(names: List<String>)
+
 
     // ==========================================
-    // 3. COLLECTION ITEMS
+    // 4. COLLECTION ITEMS
     // ==========================================
 
     @Query("SELECT * FROM collection_items WHERE collectionId = :collectionId ORDER BY addedAt DESC")

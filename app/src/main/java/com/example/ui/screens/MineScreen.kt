@@ -26,13 +26,13 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
-import androidx.compose.material.icons.filled.*
-import androidx.compose.material.icons.outlined.Collections
-import androidx.compose.material.icons.outlined.Favorite
-import androidx.compose.material.icons.outlined.Language
-import androidx.compose.material.icons.outlined.Palette
+import androidx.compose.material.icons.automirrored.rounded.ArrowBack
+import androidx.compose.material.icons.automirrored.rounded.KeyboardArrowRight
+import androidx.compose.material.icons.rounded.*
+import androidx.compose.material.icons.rounded.Collections
+import androidx.compose.material.icons.rounded.Favorite
+import androidx.compose.material.icons.rounded.Language
+import androidx.compose.material.icons.rounded.Palette
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -51,6 +51,7 @@ import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
 import btm.m.todaywallpaper.data.model.CollectionItem
 import btm.m.todaywallpaper.data.model.FavoriteWallpaper
+import btm.m.todaywallpaper.data.model.HistoryWallpaper
 import btm.m.todaywallpaper.data.model.WallpaperCollection
 import btm.m.todaywallpaper.ui.viewmodel.WallpaperViewModel
 
@@ -65,18 +66,27 @@ fun MineScreen(
     
     // Observed states from DB/Repository via ViewModel
     val favorites by viewModel.favorites.collectAsState()
+    val history by viewModel.history.collectAsState()
     val collections by viewModel.collections.collectAsState()
+    val albumCategories by viewModel.albumCategories.collectAsState()
     val activeCollectionItems by viewModel.activeCollectionItems.collectAsState()
 
     // Preferences states
     val currentLang by viewModel.language.collectAsState()
     val homeType by viewModel.homeWallpaperType.collectAsState()
     val categories by viewModel.categories.collectAsState()
+    val predictiveBackEnabled by viewModel.predictiveBackEnabled.collectAsState()
+    val predictiveBackMaxProgress by viewModel.predictiveBackMaxProgress.collectAsState()
+    val deviceBackCorner = btm.m.todaywallpaper.ui.widget.rememberDeviceCornerRadius()
     // UI Interactive States
-    var showCreateCollectionDialog by remember { mutableStateOf(false) }
     var selectedCollectionForDetail by remember { mutableStateOf<WallpaperCollection?>(null) }
-    var showEditProfileDialog by remember { mutableStateOf(false) }
     var showAboutPage by remember { mutableStateOf(false) }
+    var selectedAlbumCategoryId by remember { mutableStateOf<Long?>(null) }
+    val visibleCollections = remember(collections, selectedAlbumCategoryId) {
+        selectedAlbumCategoryId?.let { categoryId ->
+            collections.filter { it.categoryId == categoryId }
+        } ?: collections
+    }
 
     LaunchedEffect(showAboutPage) {
         viewModel.setAboutPageVisible(showAboutPage)
@@ -89,6 +99,7 @@ fun MineScreen(
     }
 
     var collectionBackProgress by remember { mutableStateOf(0f) }
+    var collectionBackDirection by remember { mutableStateOf(1f) }
     var isCollectionBackSwiping by remember { mutableStateOf(false) }
 
     LaunchedEffect(selectedCollectionForDetail) {
@@ -100,13 +111,16 @@ fun MineScreen(
     }
 
     if (selectedCollectionForDetail != null) {
-        PredictiveBackHandler { progressFlow ->
+        PredictiveBackHandler(enabled = predictiveBackEnabled) { progressFlow ->
             try {
                 isCollectionBackSwiping = true
                 progressFlow.collect { backEvent ->
-                    collectionBackProgress = backEvent.progress
+                    collectionBackProgress = kotlin.math.min(
+                        backEvent.progress,
+                        predictiveBackMaxProgress / 100f
+                    )
+                    collectionBackDirection = if (backEvent.swipeEdge == androidx.activity.BackEventCompat.EDGE_RIGHT) -1f else 1f
                 }
-                isCollectionBackSwiping = false
                 collectionBackProgress = 1f
                 selectedCollectionForDetail = null
             } catch (_: Exception) {
@@ -120,38 +134,6 @@ fun MineScreen(
     val currentAvatarUrl by viewModel.avatarUrl.collectAsState()
     val currentProfileSubtitle by viewModel.profileSubtitle.collectAsState()
     
-    var tempAvatarUrlForDialog by remember { mutableStateOf("") }
-
-    val avatarPickerLauncher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.GetContent()
-    ) { uri: Uri? ->
-        if (uri != null) {
-            try {
-                val inputStream = context.contentResolver.openInputStream(uri)
-                if (inputStream != null) {
-                    val timeStamp = java.text.SimpleDateFormat("yyyyMMdd_HHmmss", java.util.Locale.getDefault()).format(java.util.Date())
-                    val fileName = "avatar_$timeStamp.jpg"
-                    context.filesDir.listFiles()?.forEach { file ->
-                        if (file.name.startsWith("avatar_") && file.name.endsWith(".jpg")) {
-                            file.delete()
-                        }
-                    }
-                    val avatarFile = java.io.File(context.filesDir, fileName)
-                    java.io.FileOutputStream(avatarFile).use { output ->
-                        inputStream.use { input ->
-                            input.copyTo(output)
-                        }
-                    }
-                    tempAvatarUrlForDialog = avatarFile.absolutePath
-                    Toast.makeText(context, viewModel.getTranslation("已加载本地图片预览", "Local image loaded for preview"), Toast.LENGTH_SHORT).show()
-                }
-            } catch (e: Exception) {
-                e.printStackTrace()
-                Toast.makeText(context, viewModel.getTranslation("无法读取该图片文件", "Failed to load selected image"), Toast.LENGTH_SHORT).show()
-            }
-        }
-    }
-
     AnimatedContent(
         targetState = showAboutPage,
         transitionSpec = {
@@ -194,30 +176,30 @@ fun MineScreen(
                             .fillMaxWidth()
                             .clip(RoundedCornerShape(20.dp))
                             .clickable {
-                                tempAvatarUrlForDialog = currentAvatarUrl ?: ""
-                                showEditProfileDialog = true
+                                viewModel.showProfileOverlay()
                             }
                             .padding(8.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Surface(
                             modifier = Modifier
-                                .size(64.dp)
-                                .border(1.5.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.5f), RoundedCornerShape(18.dp)),
+                                .size(64.dp),
                             color = MaterialTheme.colorScheme.primary.copy(alpha = 0.1f),
-                            shape = RoundedCornerShape(18.dp)
+                            shape = androidx.compose.foundation.shape.CircleShape
                         ) {
                             Box(contentAlignment = Alignment.Center) {
                                 if (currentAvatarUrl != null) {
                                     AsyncImage(
                                         model = currentAvatarUrl,
                                         contentDescription = "User avatar",
-                                        modifier = Modifier.fillMaxSize(),
+                                        modifier = Modifier
+                                            .fillMaxSize()
+                                            .clip(androidx.compose.foundation.shape.CircleShape),
                                         contentScale = ContentScale.Crop
                                     )
                                 } else {
                                     Icon(
-                                        imageVector = Icons.Filled.Person,
+                                        imageVector = Icons.Rounded.Person,
                                         contentDescription = "User avatar icon",
                                         tint = MaterialTheme.colorScheme.primary,
                                         modifier = Modifier.size(32.dp)
@@ -238,7 +220,7 @@ fun MineScreen(
                                 )
                                 Spacer(modifier = Modifier.width(6.dp))
                                 Icon(
-                                    imageVector = Icons.Filled.Edit,
+                                    imageVector = Icons.Rounded.Edit,
                                     contentDescription = "Edit Profile",
                                     tint = MaterialTheme.colorScheme.secondary,
                                     modifier = Modifier.size(14.dp)
@@ -264,17 +246,17 @@ fun MineScreen(
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         SectionTitle(
-                            icon = Icons.Outlined.Collections,
+                            icon = Icons.Rounded.Collections,
                             text = viewModel.getTranslation("本地自定义图集", "Custom Albums"),
                             modifier = Modifier.weight(1f)
                         )
 
                         IconButton(
-                            onClick = { showCreateCollectionDialog = true },
+                            onClick = { viewModel.showCreateCollectionOverlay() },
                             modifier = Modifier.testTag("mine_add_collection_btn")
                         ) {
                             Icon(
-                                imageVector = Icons.Default.Add,
+                                imageVector = Icons.Rounded.Add,
                                 contentDescription = "Create Album",
                                 tint = MaterialTheme.colorScheme.primary
                             )
@@ -283,7 +265,42 @@ fun MineScreen(
 
                     Spacer(modifier = Modifier.height(10.dp))
 
-                    if (collections.isEmpty()) {
+                    if (albumCategories.isNotEmpty()) {
+                        LazyRow(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            item(key = "all_albums") {
+                                FilterChip(
+                                    selected = selectedAlbumCategoryId == null,
+                                    onClick = { selectedAlbumCategoryId = null },
+                                    label = { Text(viewModel.getTranslation("全部", "All")) },
+                                    colors = FilterChipDefaults.filterChipColors(
+                                        selectedContainerColor = MaterialTheme.colorScheme.primaryContainer,
+                                        selectedLabelColor = MaterialTheme.colorScheme.onPrimaryContainer,
+                                        containerColor = Color.Transparent,
+                                        labelColor = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                )
+                            }
+                            items(albumCategories, key = { "album_category_${it.id}" }) { category ->
+                                FilterChip(
+                                    selected = selectedAlbumCategoryId == category.id,
+                                    onClick = { selectedAlbumCategoryId = category.id },
+                                    label = { Text(category.name) },
+                                    colors = FilterChipDefaults.filterChipColors(
+                                        selectedContainerColor = MaterialTheme.colorScheme.primaryContainer,
+                                        selectedLabelColor = MaterialTheme.colorScheme.onPrimaryContainer,
+                                        containerColor = Color.Transparent,
+                                        labelColor = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                )
+                            }
+                        }
+                        Spacer(modifier = Modifier.height(10.dp))
+                    }
+
+                    if (visibleCollections.isEmpty()) {
                         Surface(
                             modifier = Modifier
                                 .fillMaxWidth()
@@ -295,11 +312,15 @@ fun MineScreen(
                                 ),
                             color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.2f),
                             shape = RoundedCornerShape(14.dp),
-                            onClick = { showCreateCollectionDialog = true }
+                            onClick = { viewModel.showCreateCollectionOverlay() }
                         ) {
                             Box(contentAlignment = Alignment.Center) {
                                 Text(
-                                    text = viewModel.getTranslation("+ 创建你的第一个专属图集", "+ Create your first custom album"),
+                                    text = if (collections.isEmpty()) {
+                                        viewModel.getTranslation("+ 创建你的第一个专属图集", "+ Create your first custom album")
+                                    } else {
+                                        viewModel.getTranslation("该分类下暂无图集", "No albums in this category")
+                                    },
                                     fontSize = 13.sp,
                                     fontWeight = FontWeight.Medium,
                                     color = MaterialTheme.colorScheme.secondary
@@ -312,8 +333,12 @@ fun MineScreen(
                             horizontalArrangement = Arrangement.spacedBy(10.dp),
                             modifier = Modifier.fillMaxWidth()
                         ) {
-                            items(collections, key = { it.id }) { album ->
-                                AlbumCardItem(album = album, viewModel = viewModel) {
+                            items(visibleCollections, key = { it.id }) { album ->
+                                AlbumCardItem(
+                                    album = album,
+                                    categoryName = albumCategories.firstOrNull { it.id == album.categoryId }?.name,
+                                    viewModel = viewModel
+                                ) {
                                     selectedCollectionForDetail = album
                                     viewModel.fetchActiveCollectionItems(album.id)
                                 }
@@ -323,9 +348,61 @@ fun MineScreen(
 
                     Spacer(modifier = Modifier.height(28.dp))
 
+                    // SECTION 3: RECENTLY VIEWED WALLPAPERS
+                    SectionTitle(
+                        icon = Icons.Rounded.History,
+                        text = viewModel.getTranslation("历史壁纸", "Recently Viewed"),
+                        modifier = Modifier.fillMaxWidth()
+                    )
+
+                    Spacer(modifier = Modifier.height(10.dp))
+
+                    if (history.isEmpty()) {
+                        Surface(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(120.dp)
+                                .border(
+                                    1.dp,
+                                    MaterialTheme.colorScheme.onBackground.copy(alpha = 0.05f),
+                                    RoundedCornerShape(16.dp)
+                                ),
+                            color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.2f),
+                            shape = RoundedCornerShape(16.dp)
+                        ) {
+                            Box(contentAlignment = Alignment.Center) {
+                                Text(
+                                    text = viewModel.getTranslation("暂无浏览记录，打开壁纸详情后会自动保存", "No viewing history yet. Open a wallpaper to save it here."),
+                                    fontSize = 12.sp,
+                                    color = MaterialTheme.colorScheme.secondary,
+                                    textAlign = TextAlign.Center,
+                                    modifier = Modifier.padding(16.dp)
+                                )
+                            }
+                        }
+                    } else {
+                        LazyRow(
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            items(history, key = { it.id }) { wallpaper ->
+                                HistoryPreviewCard(wallpaper = wallpaper) {
+                                    onViewDetail(
+                                        wallpaper.id,
+                                        wallpaper.imageUrl,
+                                        wallpaper.authorName,
+                                        wallpaper.source
+                                    )
+                                }
+                            }
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(28.dp))
+
                     // SECTION 2: BOOKMARKED FAVORITES (HORIZONTAL PREVIEWS)
                     SectionTitle(
-                        icon = Icons.Outlined.Favorite,
+                        icon = Icons.Rounded.Favorite,
                         text = viewModel.getTranslation("我喜欢的壁纸", "My Favorites"),
                         modifier = Modifier.fillMaxWidth()
                     )
@@ -375,456 +452,48 @@ fun MineScreen(
 
                     Spacer(modifier = Modifier.height(28.dp))
 
-                    // SECTION 3: SYSTEM PREFERENCES & CONTROLS
-                    SectionTitle(
-                        icon = Icons.Filled.Settings,
-                        text = viewModel.getTranslation("偏好与系统设置", "System Preferences"),
-                        modifier = Modifier.fillMaxWidth()
-                    )
-
-                    Spacer(modifier = Modifier.height(10.dp))
-
-                    Card(
+                    // Settings and About use the same grouped-card language as Settings.
+                    Column(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .border(
-                                1.dp,
-                                MaterialTheme.colorScheme.onBackground.copy(alpha = 0.05f),
-                                RoundedCornerShape(16.dp)
-                            ),
-                        shape = RoundedCornerShape(16.dp),
-                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+                            .clip(RoundedCornerShape(18.dp))
+                            .background(MaterialTheme.colorScheme.surface)
                     ) {
-                        Column(modifier = Modifier.fillMaxWidth()) {
-                            // Language modifier row
-                            Row(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .clickable { viewModel.toggleLanguage() }
-                                    .padding(16.dp),
-                                horizontalArrangement = Arrangement.SpaceBetween,
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Row(verticalAlignment = Alignment.CenterVertically) {
-                                    Icon(
-                                        imageVector = Icons.Outlined.Language,
-                                        contentDescription = "Language",
-                                        tint = MaterialTheme.colorScheme.primary,
-                                        modifier = Modifier.size(20.dp)
-                                    )
-                                    Spacer(modifier = Modifier.width(12.dp))
-                                    Text(
-                                        text = viewModel.getTranslation("语言 (Language)", "Language (語言)"),
-                                        fontSize = 14.sp,
-                                        fontWeight = FontWeight.Medium,
-                                        color = MaterialTheme.colorScheme.onSurface
-                                    )
-                                }
+                        Row(
+                            Modifier.fillMaxWidth()
+                                .clickable { context.startActivity(android.content.Intent(context, SettingsActivity::class.java)) }
+                                .padding(16.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Icon(Icons.Rounded.Settings, null, Modifier.size(20.dp), tint = MaterialTheme.colorScheme.primary)
+                            Spacer(Modifier.width(12.dp))
+                            Column(Modifier.weight(1f)) {
                                 Text(
-                                    text = if (currentLang == "zh") "简体中文" else "English",
-                                    fontSize = 13.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    color = MaterialTheme.colorScheme.primary
+                                    text = viewModel.getTranslation("设置", "Settings"),
+                                    fontSize = 14.sp,
+                                    fontWeight = FontWeight.Medium,
+                                    color = MaterialTheme.colorScheme.onSurface
                                 )
+                                Text(viewModel.getTranslation("语言、壁纸与系统偏好", "Language, wallpaper and system preferences"), fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
                             }
-
-                            HorizontalDivider(color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.06f))
-
-                            // Homepage source setting Row
-                            Row(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .clickable {
-                                        val intent = android.content.Intent(context, btm.m.todaywallpaper.ui.screens.StyleSettingActivity::class.java)
-                                        context.startActivity(intent)
-                                    }
-                                    .padding(16.dp),
-                                horizontalArrangement = Arrangement.SpaceBetween,
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Row(verticalAlignment = Alignment.CenterVertically) {
-                                    Icon(
-                                        imageVector = Icons.Outlined.Palette,
-                                        contentDescription = "Theme Set",
-                                        tint = MaterialTheme.colorScheme.primary,
-                                        modifier = Modifier.size(20.dp)
-                                    )
-                                    Spacer(modifier = Modifier.width(12.dp))
-                                    Text(
-                                        text = viewModel.getTranslation("首页沉浸壁纸风格", "Homepage Immersive Style"),
-                                        fontSize = 14.sp,
-                                        fontWeight = FontWeight.Medium,
-                                        color = MaterialTheme.colorScheme.onSurface
-                                    )
-                                }
-                                
-                                val matchedCategory = categories.find { it.key == homeType }
-                                val readableHomeType = if (matchedCategory != null) {
-                                    if (currentLang == "zh") matchedCategory.zhTitle else matchedCategory.enTitle
-                                } else if (homeType.startsWith("collection_")) {
-                                    val collId = homeType.removePrefix("collection_").toIntOrNull()
-                                    val matchedCollection = collections.find { it.id == collId }
-                                    matchedCollection?.name ?: viewModel.getTranslation("自定义图集", "Custom Collection")
-                                } else {
-                                    when (homeType) {
-                                        "PexelsCurated" -> viewModel.getTranslation("Pexels 每日精选", "Pexels Curated Scenery")
-                                        "PexelsSpace" -> viewModel.getTranslation("Pexels 极地太空", "Pexels Galactic Space")
-                                        "PexelsMinimalist" -> viewModel.getTranslation("Pexels 留白极简", "Pexels Minimal Art")
-                                        "PexelsNature" -> viewModel.getTranslation("Pexels 山川地质", "Pexels Natural Planet")
-                                        "Nekosia:cute" -> viewModel.getTranslation("Nekosia 治愈萌系", "Nekosia Kawaii Anime")
-                                        "Nekosia:girl" -> viewModel.getTranslation("Nekosia 唯美少女", "Nekosia Beauty Girl")
-                                        "Nekosia:maid" -> viewModel.getTranslation("Nekosia 优雅女仆", "Nekosia Classic Maid")
-                                        "Nekosia:vtuber" -> viewModel.getTranslation("Nekosia 虚拟主播", "Nekosia VTubers")
-                                        else -> homeType
-                                    }
-                                }
-
-                                Row(verticalAlignment = Alignment.CenterVertically) {
-                                    Text(
-                                        text = readableHomeType,
-                                        fontSize = 12.sp,
-                                        color = MaterialTheme.colorScheme.secondary,
-                                        textAlign = TextAlign.End,
-                                        modifier = Modifier.widthIn(max = 140.dp),
-                                        maxLines = 1
-                                    )
-                                    Spacer(modifier = Modifier.width(4.dp))
-                                    Icon(
-                                        imageVector = Icons.AutoMirrored.Filled.KeyboardArrowRight,
-                                        contentDescription = "Arrow",
-                                        tint = MaterialTheme.colorScheme.secondary,
-                                        modifier = Modifier.size(16.dp)
-                                    )
-                                }
-                            }
-
-                            HorizontalDivider(color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.06f))
-
-                            // Liquid Glass Adjustment row
-                            Row(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .clickable {
-                                        val intent = android.content.Intent(context, btm.m.todaywallpaper.ui.screens.LiquidGlassSettingActivity::class.java)
-                                        context.startActivity(intent)
-                                    }
-                                    .padding(16.dp),
-                                horizontalArrangement = Arrangement.SpaceBetween,
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Row(verticalAlignment = Alignment.CenterVertically) {
-                                    Icon(
-                                        imageVector = Icons.Filled.BlurOn,
-                                        contentDescription = "Liquid Glass",
-                                        tint = MaterialTheme.colorScheme.primary,
-                                        modifier = Modifier.size(20.dp)
-                                    )
-                                    Spacer(modifier = Modifier.width(12.dp))
-                                    Text(
-                                        text = viewModel.getTranslation("Liquid Glass 调整", "Liquid Glass Adjustment"),
-                                        fontSize = 14.sp,
-                                        fontWeight = FontWeight.Medium,
-                                        color = MaterialTheme.colorScheme.onSurface
-                                    )
-                                }
-                                Row(verticalAlignment = Alignment.CenterVertically) {
-                                    val liquidGlassBlurSp = context.getSharedPreferences("app_gallery_prefs", android.content.Context.MODE_PRIVATE)
-                                    val currentBlur = liquidGlassBlurSp.getFloat("liquid_glass_blur", 8f)
-                                    Text(
-                                        text = "${currentBlur.toInt()}dp",
-                                        fontSize = 12.sp,
-                                        fontWeight = FontWeight.Bold,
-                                        color = MaterialTheme.colorScheme.primary
-                                    )
-                                    Spacer(modifier = Modifier.width(4.dp))
-                                    Icon(
-                                        imageVector = Icons.AutoMirrored.Filled.KeyboardArrowRight,
-                                        contentDescription = "Arrow",
-                                        tint = MaterialTheme.colorScheme.secondary,
-                                        modifier = Modifier.size(16.dp)
-                                    )
-                                }
-                            }
-
-                            HorizontalDivider(color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.06f))
-
-                            // Custom Splash Screen row
-                            Row(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .clickable {
-                                        val intent = android.content.Intent(context, btm.m.todaywallpaper.ui.screens.SplashSettingActivity::class.java)
-                                        context.startActivity(intent)
-                                    }
-                                    .padding(16.dp),
-                                horizontalArrangement = Arrangement.SpaceBetween,
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Row(verticalAlignment = Alignment.CenterVertically) {
-                                    Icon(
-                                        imageVector = Icons.Filled.AutoAwesome,
-                                        contentDescription = "Custom Splash",
-                                        tint = MaterialTheme.colorScheme.primary,
-                                        modifier = Modifier.size(20.dp)
-                                    )
-                                    Spacer(modifier = Modifier.width(12.dp))
-                                    Text(
-                                        text = viewModel.getTranslation("自定义开屏界面", "Custom Splash Screen"),
-                                        fontSize = 14.sp,
-                                        fontWeight = FontWeight.Medium,
-                                        color = MaterialTheme.colorScheme.onSurface
-                                    )
-                                }
-                                Row(verticalAlignment = Alignment.CenterVertically) {
-                                    val splashSp = context.getSharedPreferences("app_gallery_prefs", android.content.Context.MODE_PRIVATE)
-                                    val splashModeVal = splashSp.getString("splash_mode", "app_icon") ?: "app_icon"
-                                    val modeLabel = when (splashModeVal) {
-                                        "app_icon" -> viewModel.getTranslation("默认", "Default")
-                                        "select" -> viewModel.getTranslation("已选图", "Selected")
-                                        "random" -> viewModel.getTranslation("随机", "Random")
-                                        "upload" -> viewModel.getTranslation("已上传", "Uploaded")
-                                        else -> viewModel.getTranslation("默认", "Default")
-                                    }
-                                    Text(
-                                        text = modeLabel,
-                                        fontSize = 12.sp,
-                                        fontWeight = FontWeight.Bold,
-                                        color = if (splashModeVal != "app_icon") MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.secondary
-                                    )
-                                    Spacer(modifier = Modifier.width(4.dp))
-                                    Icon(
-                                        imageVector = Icons.AutoMirrored.Filled.KeyboardArrowRight,
-                                        contentDescription = "Arrow",
-                                        tint = MaterialTheme.colorScheme.secondary,
-                                        modifier = Modifier.size(16.dp)
-                                    )
-                                }
-                            }
-
-                            HorizontalDivider(color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.06f))
-
-                            // Auto Switch Wallpaper row
-                            Row(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .clickable {
-                                        val intent = android.content.Intent(context, btm.m.todaywallpaper.ui.screens.AutoSwitchWallpaperActivity::class.java)
-                                        context.startActivity(intent)
-                                    }
-                                    .padding(16.dp),
-                                horizontalArrangement = Arrangement.SpaceBetween,
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Row(verticalAlignment = Alignment.CenterVertically) {
-                                    Icon(
-                                        imageVector = Icons.Filled.Autorenew,
-                                        contentDescription = "Auto Switch",
-                                        tint = MaterialTheme.colorScheme.primary,
-                                        modifier = Modifier.size(20.dp)
-                                    )
-                                    Spacer(modifier = Modifier.width(12.dp))
-                                    Text(
-                                        text = viewModel.getTranslation("自动切换桌面壁纸", "Auto Switch Wallpaper"),
-                                        fontSize = 14.sp,
-                                        fontWeight = FontWeight.Medium,
-                                        color = MaterialTheme.colorScheme.onSurface
-                                    )
-                                }
-                                Row(verticalAlignment = Alignment.CenterVertically) {
-                                    val autoSwitchSp = context.getSharedPreferences("app_gallery_prefs", android.content.Context.MODE_PRIVATE)
-                                    val isAutoSwitchOn = autoSwitchSp.getBoolean("auto_switch_enabled", false)
-                                    Text(
-                                        text = if (isAutoSwitchOn) viewModel.getTranslation("已开启", "On") else viewModel.getTranslation("已关闭", "Off"),
-                                        fontSize = 12.sp,
-                                        fontWeight = FontWeight.Bold,
-                                        color = if (isAutoSwitchOn) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.secondary
-                                    )
-                                    Spacer(modifier = Modifier.width(4.dp))
-                                    Icon(
-                                        imageVector = Icons.AutoMirrored.Filled.KeyboardArrowRight,
-                                        contentDescription = "Arrow",
-                                        tint = MaterialTheme.colorScheme.secondary,
-                                        modifier = Modifier.size(16.dp)
-                                    )
-                                }
-                            }
-
-                            HorizontalDivider(color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.06f))
-
-                            // Pexels API Key Config row
-                            val pexelsApiKey by viewModel.pexelsApiKey.collectAsState()
-                            var showPexelsKeyEditDialog by remember { mutableStateOf(false) }
-
-                            // WebView result launcher for API key capture
-                            val webviewResultLauncher = rememberLauncherForActivityResult(
-                                contract = ActivityResultContracts.StartActivityForResult()
-                            ) { result ->
-                                if (result.resultCode == android.app.Activity.RESULT_OK) {
-                                    val detectedKey = result.data?.getStringExtra("detected_api_key")
-                                    if (!detectedKey.isNullOrEmpty()) {
-                                        viewModel.updatePexelsApiKey(detectedKey)
-                                        Toast.makeText(context, viewModel.getTranslation("API Key 已自动保存！", "API Key saved automatically!"), Toast.LENGTH_SHORT).show()
-                                    }
-                                }
-                            }
-
-                            Row(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .clickable { showPexelsKeyEditDialog = true }
-                                    .padding(16.dp),
-                                horizontalArrangement = Arrangement.SpaceBetween,
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Row(verticalAlignment = Alignment.CenterVertically) {
-                                    Icon(
-                                        imageVector = androidx.compose.material.icons.Icons.Default.VpnKey,
-                                        contentDescription = "Pexels Key",
-                                        tint = MaterialTheme.colorScheme.primary,
-                                        modifier = Modifier.size(20.dp)
-                                    )
-                                    Spacer(modifier = Modifier.width(12.dp))
-                                    Text(
-                                        text = "Pexels API Key",
-                                        fontSize = 14.sp,
-                                        fontWeight = FontWeight.Medium,
-                                        color = MaterialTheme.colorScheme.onSurface
-                                    )
-                                }
-                                Row(verticalAlignment = Alignment.CenterVertically) {
-                                    Text(
-                                        text = if (pexelsApiKey.isEmpty()) viewModel.getTranslation("未配置 (点击设置)", "Unconfigured (Click to Setup)") else viewModel.getTranslation("已配置", "Configured"),
-                                        fontSize = 12.sp,
-                                        fontWeight = FontWeight.Bold,
-                                        color = if (pexelsApiKey.isEmpty()) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary
-                                    )
-                                    Spacer(modifier = Modifier.width(4.dp))
-                                    Icon(
-                                        imageVector = Icons.AutoMirrored.Filled.KeyboardArrowRight,
-                                        contentDescription = "Arrow",
-                                        tint = MaterialTheme.colorScheme.secondary,
-                                        modifier = Modifier.size(16.dp)
-                                    )
-                                }
-                            }
-
-                            if (showPexelsKeyEditDialog) {
-                                var tempKeyInput by remember { mutableStateOf(pexelsApiKey) }
-                                AlertDialog(
-                                    onDismissRequest = { showPexelsKeyEditDialog = false },
-                                    title = {
-                                        Text(
-                                            text = "Pexels API Key",
-                                            fontWeight = FontWeight.Bold,
-                                            fontSize = 18.sp
-                                        )
-                                    },
-                                    text = {
-                                        Column(modifier = Modifier.fillMaxWidth()) {
-                                            Text(
-                                                text = viewModel.getTranslation(
-                                                    "在下方输入您的 Pexels API 密钥以解锁高质量实景风光壁纸库。留空并保存则将其清除：",
-                                                    "Enter your Pexels API key below to query scenic landscape backdrops live. Leave empty and save to reset:"
-                                                ),
-                                                fontSize = 13.sp,
-                                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                                lineHeight = 18.sp
-                                            )
-                                            Spacer(modifier = Modifier.height(12.dp))
-                                            OutlinedTextField(
-                                                value = tempKeyInput,
-                                                onValueChange = { tempKeyInput = it },
-                                                placeholder = { Text("Pexels API Key...") },
-                                                singleLine = true,
-                                                modifier = Modifier.fillMaxWidth().testTag("mine_pexels_api_key_field"),
-                                                shape = RoundedCornerShape(10.dp)
-                                            )
-                                            Spacer(modifier = Modifier.height(12.dp))
-                                            // Register API Key via WebView button
-                                            OutlinedButton(
-                                                onClick = {
-                                                    showPexelsKeyEditDialog = false
-                                                    val intent = android.content.Intent(context, PexelsWebViewActivity::class.java)
-                                                    webviewResultLauncher.launch(intent)
-                                                },
-                                                modifier = Modifier.fillMaxWidth(),
-                                                shape = RoundedCornerShape(12.dp)
-                                            ) {
-                                                Icon(
-                                                    imageVector = Icons.Filled.OpenInBrowser,
-                                                    contentDescription = "Register",
-                                                    tint = MaterialTheme.colorScheme.primary,
-                                                    modifier = Modifier.size(18.dp)
-                                                )
-                                                Spacer(modifier = Modifier.width(8.dp))
-                                                Column {
-                                                    Text(
-                                                        text = viewModel.getTranslation("还没有 API Key？点击注册", "Don't have an API Key? Register here"),
-                                                        fontSize = 13.sp,
-                                                        fontWeight = FontWeight.Bold,
-                                                        color = MaterialTheme.colorScheme.primary
-                                                    )
-                                                    Text(
-                                                        text = viewModel.getTranslation("打开 Pexels API 页面，注册后自动获取", "Open Pexels API page, key will be auto-captured"),
-                                                        fontSize = 10.sp,
-                                                        color = MaterialTheme.colorScheme.secondary
-                                                    )
-                                                }
-                                            }
-                                        }
-                                    },
-                                    confirmButton = {
-                                        Button(
-                                            onClick = {
-                                                viewModel.updatePexelsApiKey(tempKeyInput.trim())
-                                                showPexelsKeyEditDialog = false
-                                            },
-                                            modifier = Modifier.testTag("mine_save_key_button")
-                                        ) {
-                                            Text(text = viewModel.getTranslation("保存配置", "Save"))
-                                        }
-                                    },
-                                    dismissButton = {
-                                        TextButton(onClick = { showPexelsKeyEditDialog = false }) {
-                                            Text(text = viewModel.getTranslation("取消", "Cancel"))
-                                        }
-                                    },
-                                    shape = RoundedCornerShape(20.dp)
-                                )
-                            }
+                            Icon(Icons.AutoMirrored.Rounded.KeyboardArrowRight, null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
                         }
-                    }
-
-                    Spacer(modifier = Modifier.height(20.dp))
-
-                    // SECTION 4: ABOUT ENTRY
-                    Card(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .border(
-                                1.dp,
-                                MaterialTheme.colorScheme.onBackground.copy(alpha = 0.05f),
-                                RoundedCornerShape(16.dp)
-                            )
-                            .clickable { showAboutPage = true },
-                        shape = RoundedCornerShape(16.dp),
-                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
-                    ) {
                         Row(
                             modifier = Modifier
                                 .fillMaxWidth()
+                                .clickable { showAboutPage = true }
                                 .padding(16.dp),
                             horizontalArrangement = Arrangement.Start,
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             Icon(
-                                imageVector = Icons.Filled.Info,
+                                imageVector = Icons.Rounded.Info,
                                 contentDescription = "About",
                                 tint = MaterialTheme.colorScheme.primary,
                                 modifier = Modifier.size(20.dp)
                             )
                             Spacer(modifier = Modifier.width(12.dp))
-                            Column(horizontalAlignment = Alignment.Start) {
+                            Column(Modifier.weight(1f), horizontalAlignment = Alignment.Start) {
                                 Text(
                                     text = viewModel.getTranslation("关于", "About"),
                                     fontSize = 14.sp,
@@ -839,6 +508,11 @@ fun MineScreen(
                                     textAlign = TextAlign.Start
                                 )
                             }
+                            Icon(
+                                Icons.AutoMirrored.Rounded.KeyboardArrowRight,
+                                null,
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
                         }
                     }
 
@@ -852,67 +526,15 @@ fun MineScreen(
                             viewModel = viewModel,
                             backProgress = collectionBackProgress,
                             isBackSwiping = isCollectionBackSwiping,
+                            backDirection = collectionBackDirection,
+                            deviceCorner = deviceBackCorner,
                             onBack = { selectedCollectionForDetail = null },
                             onViewDetail = onViewDetail
                         )
                     }
                 }
 
-                if (showCreateCollectionDialog) {
-                    CreateCollectionDialog(
-                        viewModel = viewModel,
-                        onDismiss = { showCreateCollectionDialog = false },
-                        onConfirm = { name, desc, selectedUris ->
-                            viewModel.createNewCollection(name, desc) { collectionId ->
-                                if (selectedUris.isNotEmpty()) {
-                                    // Batch upload selected images
-                                    kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.IO).launch {
-                                        selectedUris.forEachIndexed { index, uri ->
-                                            try {
-                                                val stream = context.contentResolver.openInputStream(uri)
-                                                if (stream != null) {
-                                                    val folder = java.io.File(context.filesDir, "local_collections")
-                                                    if (!folder.exists()) folder.mkdirs()
-                                                    val photoId = "local_${System.currentTimeMillis()}_$index"
-                                                    val file = java.io.File(folder, "img_${photoId}.jpg")
-                                                    kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
-                                                        java.io.FileOutputStream(file).use { out ->
-                                                            stream.use { input -> input.copyTo(out) }
-                                                        }
-                                                    }
-                                                    val localPath = "file://${file.absolutePath}"
-                                                    val wallpaper = btm.m.todaywallpaper.ui.viewmodel.UnifiedWallpaper(
-                                                        id = photoId,
-                                                        imageUrl = localPath,
-                                                        thumbnailUrl = localPath,
-                                                        author = null,
-                                                        authorUrl = "",
-                                                        source = "Local Gallery",
-                                                        category = null
-                                                    )
-                                                    withContext(kotlinx.coroutines.Dispatchers.Main) {
-                                                        viewModel.addWallpaperToCollectionId(collectionId, wallpaper)
-                                                    }
-                                                }
-                                            } catch (e: Exception) {
-                                                // Skip failed images silently
-                                            }
-                                        }
-                                        withContext(kotlinx.coroutines.Dispatchers.Main) {
-                                            showCreateCollectionDialog = false
-                                            Toast.makeText(context, viewModel.getTranslation("图集创建成功！已添加 ${selectedUris.size} 张图片", "Album created! Added ${selectedUris.size} images"), Toast.LENGTH_SHORT).show()
-                                        }
-                                    }
-                                } else {
-                                    showCreateCollectionDialog = false
-                                    Toast.makeText(context, viewModel.getTranslation("图集创建成功！", "Album created successfully!"), Toast.LENGTH_SHORT).show()
-                                }
-                            }
-                        }
-                    )
-                }
-
-                if (showEditProfileDialog) {
+                /* if (showEditProfileDialog) {
                     var inputUsername by remember { mutableStateOf(currentUsername) }
                     var inputSubtitle by remember { mutableStateOf(currentProfileSubtitle) }
 
@@ -937,7 +559,7 @@ fun MineScreen(
                                         .clip(RoundedCornerShape(18.dp))
                                         .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.08f))
                                         .border(1.5.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.25f), RoundedCornerShape(18.dp))
-                                        .clickable { avatarPickerLauncher.launch("image/*") },
+                                        .clickable { avatarPickerLauncher.launch("image / *") },
                                     contentAlignment = Alignment.Center
                                 ) {
                                     if (tempAvatarUrlForDialog.isNotEmpty()) {
@@ -949,7 +571,7 @@ fun MineScreen(
                                         )
                                     } else {
                                         Icon(
-                                            imageVector = Icons.Filled.Person,
+                                            imageVector = Icons.Rounded.Person,
                                             contentDescription = "Select photo",
                                             tint = MaterialTheme.colorScheme.primary,
                                             modifier = Modifier.size(32.dp)
@@ -1027,7 +649,7 @@ fun MineScreen(
                             }
                         }
                     )
-                }
+                } */
         }
     }
 
@@ -1042,6 +664,7 @@ fun MineScreen(
 @Composable
 fun AlbumCardItem(
     album: WallpaperCollection,
+    categoryName: String? = null,
     viewModel: WallpaperViewModel,
     onClick: () -> Unit
 ) {
@@ -1116,6 +739,15 @@ fun AlbumCardItem(
                         lineHeight = 13.sp
                     )
                 }
+
+                if (!categoryName.isNullOrEmpty()) {
+                    Text(
+                        text = categoryName,
+                        color = Color.White.copy(alpha = 0.78f),
+                        fontSize = 10.sp,
+                        maxLines = 1
+                    )
+                }
             }
         }
     }
@@ -1164,6 +796,47 @@ fun FavoritePreviewCard(
     }
 }
 
+@Composable
+fun HistoryPreviewCard(
+    wallpaper: HistoryWallpaper,
+    onClick: () -> Unit
+) {
+    Card(
+        modifier = Modifier
+            .width(100.dp)
+            .height(150.dp)
+            .clip(RoundedCornerShape(10.dp))
+            .clickable { onClick() }
+            .testTag("history_item_${wallpaper.id}"),
+        shape = RoundedCornerShape(10.dp)
+    ) {
+        Box(modifier = Modifier.fillMaxSize()) {
+            AsyncImage(
+                model = wallpaper.thumbnailUrl,
+                contentDescription = "Viewed picture preview",
+                modifier = Modifier.fillMaxSize(),
+                contentScale = ContentScale.Crop
+            )
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .align(Alignment.BottomCenter)
+                    .background(Color.Black.copy(alpha = 0.5f))
+                    .padding(vertical = 4.dp, horizontal = 6.dp)
+            ) {
+                Text(
+                    text = wallpaper.source,
+                    color = Color.White,
+                    fontSize = 9.sp,
+                    fontWeight = FontWeight.Bold,
+                    textAlign = TextAlign.Center,
+                    modifier = Modifier.fillMaxWidth()
+                )
+            }
+        }
+    }
+}
+
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun CollectionDetailsView(
@@ -1172,6 +845,8 @@ fun CollectionDetailsView(
     viewModel: WallpaperViewModel,
     backProgress: Float = 0f,
     isBackSwiping: Boolean = false,
+    backDirection: Float = 1f,
+    deviceCorner: androidx.compose.ui.unit.Dp = 28.dp,
     onBack: () -> Unit,
     onViewDetail: (String, String, String?, String) -> Unit
 ) {
@@ -1264,12 +939,17 @@ fun CollectionDetailsView(
         modifier = Modifier
             .fillMaxSize()
                 .graphicsLayer(
-                scaleX = 1f - (backProgress * 0.08f),
-                scaleY = 1f - (backProgress * 0.08f),
-                translationX = with(androidx.compose.ui.platform.LocalDensity.current) { (backProgress * 120).dp.toPx() },
-                alpha = 1f - (backProgress * 0.2f),
+                scaleX = 1f - backProgress * 0.12f,
+                scaleY = 1f - backProgress * 0.12f,
+                translationX = with(androidx.compose.ui.platform.LocalDensity.current) {
+                    (backProgress * 48f * backDirection).dp.toPx()
+                },
+                translationY = with(androidx.compose.ui.platform.LocalDensity.current) {
+                    (backProgress * 16f).dp.toPx()
+                },
+                alpha = 1f,
                 clip = backProgress > 0f,
-                shape = RoundedCornerShape((backProgress * 24).dp)
+                shape = RoundedCornerShape(deviceCorner * backProgress)
             )
             .statusBarsPadding()
     ) {
@@ -1285,7 +965,7 @@ fun CollectionDetailsView(
                 modifier = Modifier.testTag("album_detail_back")
             ) {
                 Icon(
-                    imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+                    imageVector = Icons.AutoMirrored.Rounded.ArrowBack,
                     contentDescription = "Back",
                     tint = MaterialTheme.colorScheme.onBackground
                 )
@@ -1313,7 +993,7 @@ fun CollectionDetailsView(
                 modifier = Modifier.testTag("set_cover_btn")
             ) {
                 Icon(
-                    imageVector = Icons.Filled.PhotoCamera,
+                    imageVector = Icons.Rounded.PhotoCamera,
                     contentDescription = "Set Cover",
                     tint = MaterialTheme.colorScheme.primary
                 )
@@ -1325,7 +1005,7 @@ fun CollectionDetailsView(
                 modifier = Modifier.testTag("upload_photo_btn")
             ) {
                 Icon(
-                    imageVector = Icons.Filled.Add,
+                    imageVector = Icons.Rounded.Add,
                     contentDescription = "Upload Photo",
                     tint = MaterialTheme.colorScheme.primary
                 )
@@ -1339,7 +1019,7 @@ fun CollectionDetailsView(
                 modifier = Modifier.testTag("delete_album_btn")
             ) {
                 Icon(
-                    imageVector = Icons.Filled.Delete,
+                    imageVector = Icons.Rounded.Delete,
                     contentDescription = "Delete Album",
                     tint = Color.Red.copy(alpha = 0.8f)
                 )
@@ -1357,7 +1037,7 @@ fun CollectionDetailsView(
                 horizontalAlignment = Alignment.CenterHorizontally
             ) {
                 Icon(
-                    imageVector = Icons.Outlined.Collections,
+                    imageVector = Icons.Rounded.Collections,
                     contentDescription = "Empty collection",
                     tint = MaterialTheme.colorScheme.secondary.copy(alpha = 0.3f),
                     modifier = Modifier.size(56.dp)
@@ -1378,7 +1058,7 @@ fun CollectionDetailsView(
                     shape = RoundedCornerShape(20.dp)
                 ) {
                     Icon(
-                        imageVector = Icons.Filled.Add,
+                        imageVector = Icons.Rounded.Add,
                         contentDescription = null,
                         modifier = Modifier.size(18.dp)
                     )
@@ -1472,7 +1152,7 @@ fun CollectionDetailsView(
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             Icon(
-                                imageVector = Icons.Filled.Image,
+                                imageVector = Icons.Rounded.Image,
                                 contentDescription = "Set as Cover",
                                 tint = MaterialTheme.colorScheme.primary,
                                 modifier = Modifier.size(22.dp)
@@ -1514,7 +1194,7 @@ fun CollectionDetailsView(
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             Icon(
-                                imageVector = Icons.Filled.DeleteOutline,
+                                imageVector = Icons.Rounded.DeleteOutline,
                                 contentDescription = "Delete",
                                 tint = MaterialTheme.colorScheme.error,
                                 modifier = Modifier.size(22.dp)
@@ -1651,124 +1331,3 @@ fun CollectionDetailsView(
         )
     }
 }
-
-@Composable
-fun CreateCollectionDialog(
-    viewModel: WallpaperViewModel,
-    onDismiss: () -> Unit,
-    onConfirm: (String, String?, List<Uri>) -> Unit
-) {
-    var collectionName by remember { mutableStateOf("") }
-    var collectionDesc by remember { mutableStateOf("") }
-    val selectedUris = remember { mutableStateListOf<Uri>() }
-    val context = LocalContext.current
-
-    val multiImagePicker = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.GetMultipleContents()
-    ) { uris: List<Uri> ->
-        selectedUris.clear()
-        selectedUris.addAll(uris)
-    }
-
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = {
-            Text(
-                text = viewModel.getTranslation("创建新壁纸图集", "Create New Album"),
-                fontSize = 18.sp,
-                fontWeight = FontWeight.Bold
-            )
-        },
-        text = {
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(top = 10.dp),
-                verticalArrangement = Arrangement.spacedBy(10.dp)
-            ) {
-                OutlinedTextField(
-                    value = collectionName,
-                    onValueChange = { collectionName = it },
-                    label = { Text(text = viewModel.getTranslation("图集名称 (必填)", "Album Name *")) },
-                    singleLine = true,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .testTag("dialog_album_name_input"),
-                    shape = RoundedCornerShape(12.dp)
-                )
-
-                OutlinedTextField(
-                    value = collectionDesc,
-                    onValueChange = { collectionDesc = it },
-                    label = { Text(text = viewModel.getTranslation("图集描述 (选填)", "Description (Optional)")) },
-                    maxLines = 3,
-                    modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(12.dp)
-                )
-
-                // Batch image upload section
-                HorizontalDivider(color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.06f))
-
-                Text(
-                    text = viewModel.getTranslation("批量添加图片（可选）", "Batch add images (optional)"),
-                    fontSize = 13.sp,
-                    fontWeight = FontWeight.Medium,
-                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f)
-                )
-
-                OutlinedButton(
-                    onClick = { multiImagePicker.launch("image/*") },
-                    modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(12.dp)
-                ) {
-                    Icon(
-                        imageVector = Icons.Filled.PhotoLibrary,
-                        contentDescription = null,
-                        modifier = Modifier.size(18.dp)
-                    )
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Text(
-                        text = if (selectedUris.isEmpty()) {
-                            viewModel.getTranslation("选择本地图片", "Select local images")
-                        } else {
-                            viewModel.getTranslation("已选择 ${selectedUris.size} 张图片", "${selectedUris.size} images selected")
-                        }
-                    )
-                }
-
-                // Show selected image count if any
-                if (selectedUris.isNotEmpty()) {
-                    Text(
-                        text = viewModel.getTranslation(
-                            "已选择 ${selectedUris.size} 张图片，创建后将自动添加到图集中",
-                            "${selectedUris.size} images will be added to the album after creation"
-                        ),
-                        fontSize = 11.sp,
-                        color = MaterialTheme.colorScheme.primary.copy(alpha = 0.7f)
-                    )
-                }
-            }
-        },
-        confirmButton = {
-            Button(
-                onClick = {
-                    if (collectionName.isNotBlank()) {
-                        onConfirm(collectionName, collectionDesc.ifBlank { null }, selectedUris.toList())
-                    }
-                },
-                enabled = collectionName.isNotBlank(),
-                modifier = Modifier.testTag("dialog_album_confirm_btn")
-            ) {
-                Text(text = viewModel.getTranslation("创建", "Create"))
-            }
-        },
-        dismissButton = {
-            TextButton(onClick = onDismiss) {
-                Text(text = viewModel.getTranslation("取消", "Cancel"))
-            }
-        },
-        shape = RoundedCornerShape(24.dp)
-    )
-}
-
-
